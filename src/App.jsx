@@ -516,7 +516,13 @@ export default function App() {
               <input type="number" placeholder="Amount" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
               <select value={form.paidBy} onChange={(e) => setForm({ ...form, paidBy: e.target.value })}><option>{partnerA}</option><option>{partnerB}</option></select>
               <select value={form.split} onChange={(e) => setForm({ ...form, split: e.target.value })}><option>50/50</option><option>{partnerA}</option><option>{partnerB}</option></select>
-              <button className="primary" onClick={addExpense}>Add Expense</button>
+              <button
+                type="button"
+                className="primary"
+                onClick={addExpense}
+>
+  Add Expense
+</button>
             </div>
           </section>
         </section>
