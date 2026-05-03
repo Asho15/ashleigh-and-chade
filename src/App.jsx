@@ -182,6 +182,15 @@ export default function App() {
     setIncomeForm({ ...incomeForm, amount: "" });
   }
 
+  function deleteIncome(id) {
+    savePatch({
+      income: {
+        ...data.income,
+        [month]: monthIncome.filter((i) => i.id !== id),
+      },
+    });
+  }
+
   function addSavingsAccount() {
     if (!accountForm.name.trim()) return alert("Add an account name first.");
     const newAccount = {
@@ -296,7 +305,11 @@ export default function App() {
               <div className="miniDonut"></div>
               <div className="smallList">
                 {monthIncome.map((i) => (
-                  <div key={i.id}><span>{i.who} — {i.source}</span><strong>{money(i.amount)}</strong></div>
+                  <div key={i.id} className="incomeRow">
+                    <span>{i.who} — {i.source}</span>
+                    <strong>{money(i.amount)}</strong>
+                    <button className="trash" onClick={() => deleteIncome(i.id)}><Trash2 size={15} /></button>
+                  </div>
                 ))}
               </div>
             </div>
@@ -552,7 +565,8 @@ select:focus, input:focus { border-color: #7a3f20; box-shadow: 0 0 0 4px rgba(12
 .donutAndList { display: flex; gap: 16px; align-items: center; margin: 18px 0; }
 .miniDonut { width: 95px; height: 95px; border-radius: 50%; background: conic-gradient(#7a3f20 50%, #be8e6b 50%); border: 16px solid #f5e6dc; }
 .smallList { flex: 1; display: grid; gap: 8px; }
-.smallList div { display: flex; justify-content: space-between; font-size: 13px; }
+.smallList div { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 13px; }
+.incomeRow { display: grid !important; grid-template-columns: 1fr auto auto; align-items: center; gap: 8px; }
 .formGrid { display: grid; gap: 10px; }
 .oneCol { grid-template-columns: 1fr; }
 .twoColForm { grid-template-columns: repeat(2, minmax(0, 1fr)); }
