@@ -197,7 +197,9 @@ export default function App() {
       ...accountForm,
       id: Date.now(),
       current: Number(accountForm.current || 0),
+      previous: Number(accountForm.current || 0),
       monthly: Number(accountForm.monthly || 0),
+      deposits: [],
     };
     savePatch({ savingsAccounts: [...data.savingsAccounts, newAccount] });
     setAccountForm({ owner: "Ashleigh", name: "", type: "Deposit", current: "", monthly: "" });
@@ -205,6 +207,37 @@ export default function App() {
 
   function deleteAccount(id) {
     savePatch({ savingsAccounts: data.savingsAccounts.filter((a) => a.id !== id) });
+  }
+
+  function addDepositToAccount(accountId, depositAmount, note = "Manual deposit") {
+    const amount = Number(depositAmount || 0);
+    if (!amount || amount <= 0) return alert("Enter a deposit amount first.");
+
+    const updatedAccounts = data.savingsAccounts.map((account) => {
+      if (account.id !== accountId) return account;
+
+      const previousBalance = Number(account.current || 0);
+      const newBalance = previousBalance + amount;
+
+      return {
+        ...account,
+        previous: previousBalance,
+        current: newBalance,
+        deposits: [
+          {
+            id: Date.now(),
+            date: new Date().toISOString().slice(0, 10),
+            amount,
+            note,
+            previousBalance,
+            newBalance,
+          },
+          ...(account.deposits || []),
+        ],
+      };
+    });
+
+    savePatch({ savingsAccounts: updatedAccounts });
   }
 
   function addCategory() {
@@ -323,8 +356,8 @@ export default function App() {
             </div>
           </Panel>
 
-          <SavingsPanel title="Her Savings" owner="Ashleigh" accounts={ownerAccounts("Ashleigh")} onDelete={deleteAccount} />
-          <SavingsPanel title="His Savings" owner="Chade" accounts={ownerAccounts("Chade")} onDelete={deleteAccount} />
+          <SavingsPanel title="Her Savings" owner="Ashleigh" accounts={ownerAccounts("Ashleigh")} onDelete={deleteAccount} onAddDeposit={addDepositToAccount} />
+          <SavingsPanel title="His Savings" owner="Chade" accounts={ownerAccounts("Chade")} onDelete={deleteAccount} onAddDeposit={addDepositToAccount} />
         </section>
 
         <section className="grid twoCols">
@@ -477,9 +510,20 @@ function Insight({ title, text }) {
   return <div className="insight"><p>{title}</p><strong>{text}</strong></div>;
 }
 
-function SavingsPanel({ title, accounts, onDelete }) {
+function SavingsPanel({ title, accounts, onDelete, onAddDeposit }) {
   const total = accounts.reduce((s, a) => s + Number(a.current || 0), 0);
   const monthly = accounts.reduce((s, a) => s + Number(a.monthly || 0), 0);
+  const [depositInputs, setDepositInputs] = useState({});
+
+  const updateInput = (accountId, value) => {
+    setDepositInputs((prev) => ({ ...prev, [accountId]: value }));
+  };
+
+  const submitDeposit = (accountId) => {
+    onAddDeposit(accountId, depositInputs[accountId]);
+    setDepositInputs((prev) => ({ ...prev, [accountId]: "" }));
+  };
+
   return (
     <Panel title={title} icon={<PiggyBank />}>
       <div className="savingSummary">
@@ -487,18 +531,58 @@ function SavingsPanel({ title, accounts, onDelete }) {
         <MiniStat title="Monthly" value={money(monthly)} />
       </div>
       <div className="accountsList">
-        {accounts.map((a) => (
-          <div className="accountRow" key={a.id}>
-            <div>
-              <strong>{a.name}</strong>
-              <p>{a.type} • Monthly: {money(a.monthly)}</p>
+        {accounts.map((a) => {
+          const previous = Number(a.previous ?? a.current ?? 0);
+          const current = Number(a.current || 0);
+          const difference = current - previous;
+          const latestDeposit = (a.deposits || [])[0];
+
+          return (
+            <div className="accountRow expanded" key={a.id}>
+              <div className="accountMainLine">
+                <div>
+                  <strong>{a.name}</strong>
+                  <p>{a.type} • Monthly target: {money(a.monthly)}</p>
+                </div>
+                <div className="accountRight">
+                  <b>{money(current)}</b>
+                  <button onClick={() => onDelete(a.id)}><Trash2 size={15} /></button>
+                </div>
+              </div>
+
+              <div className="balanceCompare">
+                <div>
+                  <span>Previous balance</span>
+                  <strong>{money(previous)}</strong>
+                </div>
+                <div>
+                  <span>Current balance</span>
+                  <strong>{money(current)}</strong>
+                </div>
+                <div className={difference >= 0 ? "positiveChange" : "negativeChange"}>
+                  <span>Change</span>
+                  <strong>{difference >= 0 ? "+" : ""}{money(difference)}</strong>
+                </div>
+              </div>
+
+              <div className="depositLine">
+                <input
+                  type="number"
+                  placeholder="Add deposit amount"
+                  value={depositInputs[a.id] || ""}
+                  onChange={(e) => updateInput(a.id, e.target.value)}
+                />
+                <button onClick={() => submitDeposit(a.id)}>Add Deposit</button>
+              </div>
+
+              {latestDeposit && (
+                <div className="latestDeposit">
+                  Last deposit: {money(latestDeposit.amount)} on {latestDeposit.date} • Balance moved from {money(latestDeposit.previousBalance)} to {money(latestDeposit.newBalance)}
+                </div>
+              )}
             </div>
-            <div className="accountRight">
-              <b>{money(a.current)}</b>
-              <button onClick={() => onDelete(a.id)}><Trash2 size={15} /></button>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </Panel>
   );
@@ -573,8 +657,19 @@ select:focus, input:focus { border-color: #7a3f20; box-shadow: 0 0 0 4px rgba(12
 .savingSummary { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
 .accountsList { display: grid; gap: 10px; }
 .accountRow { display: flex; justify-content: space-between; align-items: center; gap: 14px; border: 1px solid #ead9cd; border-radius: 18px; padding: 14px; background: #fff; }
+.accountRow.expanded { display: block; }
+.accountMainLine { display: flex; justify-content: space-between; align-items: center; gap: 14px; }
 .accountRow p { margin: 4px 0 0; color: #7a5845; font-size: 12px; }
 .accountRight { display: flex; align-items: center; gap: 10px; text-align: right; }
+.balanceCompare { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 12px; }
+.balanceCompare div { background: #f7eee8; border: 1px solid #efdfd4; border-radius: 14px; padding: 10px; }
+.balanceCompare span { display: block; color: #7a5845; font-size: 11px; font-weight: 800; text-transform: uppercase; margin-bottom: 4px; }
+.balanceCompare strong { font-size: 14px; color: #552713; }
+.positiveChange strong { color: #2f7d32; }
+.negativeChange strong { color: #b3261e; }
+.depositLine { display: grid; grid-template-columns: 1fr auto; gap: 10px; margin-top: 12px; }
+.depositLine button { background: #7a3f20; color: white; padding: 11px 14px; border-radius: 14px; font-weight: 900; }
+.latestDeposit { margin-top: 10px; background: #fff8f3; border-left: 4px solid #7a3f20; border-radius: 12px; padding: 10px; color: #6d4b3a; font-size: 12px; font-weight: 700; }
 .accountRight button, .trash { color: #7a3f20; background: #f7eee8; border-radius: 10px; padding: 8px; display: grid; place-items: center; }
 .inlineForm { display: flex; gap: 10px; }
 .inlineForm button { min-width: 100px; }
