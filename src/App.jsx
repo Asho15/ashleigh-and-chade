@@ -16,6 +16,10 @@ import {
   Landmark,
   ReceiptText,
   BookOpen,
+  Search,
+  Filter,
+  Pencil,
+  Save,
 } from "lucide-react";
 
 const STORAGE_KEY = "ashleigh-chade-10-year-plan-v2";
@@ -60,6 +64,22 @@ const defaultData = {
     "Date Night",
     "Other",
   ],
+  budgets: {
+    "May 2026": {
+      Rent: 8000,
+      Groceries: 5000,
+      Fuel: 2500,
+      Utilities: 1500,
+      Insurance: 2100,
+      Subscriptions: 500,
+      Coffee: 800,
+      "Take Out": 1000,
+      Medical: 500,
+      Beauty: 500,
+      "Date Night": 1000,
+      Other: 1000,
+    },
+  },
   income: {
     "May 2026": [
       { id: 1, who: "Ashleigh", source: "Salary", amount: 22000 },
@@ -78,19 +98,47 @@ const defaultData = {
     ],
   },
   savingsAccounts: [
-    { id: 1, owner: "Ashleigh", name: "TFSA - Allan Gray", type: "TFSA", current: 4000, monthly: 3000 },
-    { id: 2, owner: "Ashleigh", name: "FNB 32-Day Account", type: "Deposit", current: 8000, monthly: 2500 },
-    { id: 3, owner: "Ashleigh", name: "FNB 1-Year Fixed Deposit", type: "Fixed Deposit", current: 10000, monthly: 2500 },
-    { id: 4, owner: "Chade", name: "TFSA - FNB", type: "TFSA", current: 909, monthly: 3000 },
-    { id: 5, owner: "Chade", name: "FNB 32-Day Account", type: "Deposit", current: 0, monthly: 2500 },
-    { id: 6, owner: "Chade", name: "FNB 1-Year Fixed Deposit", type: "Fixed Deposit", current: 0, monthly: 2500 },
+    { id: 1, owner: "Ashleigh", name: "TFSA - Allan Gray", type: "TFSA", current: 4000, previous: 4000, monthly: 3000, deposits: [] },
+    { id: 2, owner: "Ashleigh", name: "FNB 32-Day Account", type: "Deposit", current: 8000, previous: 8000, monthly: 2500, deposits: [] },
+    { id: 3, owner: "Ashleigh", name: "FNB 1-Year Fixed Deposit", type: "Fixed Deposit", current: 10000, previous: 10000, monthly: 2500, deposits: [] },
+    { id: 4, owner: "Chade", name: "TFSA - FNB", type: "TFSA", current: 909, previous: 909, monthly: 3000, deposits: [] },
+    { id: 5, owner: "Chade", name: "FNB 32-Day Account", type: "Deposit", current: 0, previous: 0, monthly: 2500, deposits: [] },
+    { id: 6, owner: "Chade", name: "FNB 1-Year Fixed Deposit", type: "Fixed Deposit", current: 0, previous: 0, monthly: 2500, deposits: [] },
   ],
 };
+
+function migrateData(raw) {
+  const clean = { ...defaultData, ...raw };
+  clean.months = clean.months?.length ? clean.months : [clean.selectedMonth || "May 2026"];
+  clean.selectedMonth = clean.selectedMonth || clean.months[0];
+  clean.categories = (clean.categories || defaultData.categories).filter(
+    (c) => !["Alcohol", "Tobacco"].includes(c)
+  );
+  clean.expenses = clean.expenses || {};
+  clean.income = clean.income || {};
+  clean.budgets = clean.budgets || {};
+  clean.months.forEach((m) => {
+    clean.expenses[m] = clean.expenses[m] || [];
+    clean.income[m] = clean.income[m] || [];
+    clean.budgets[m] = clean.budgets[m] || {};
+    clean.categories.forEach((cat) => {
+      if (clean.budgets[m][cat] === undefined) clean.budgets[m][cat] = 0;
+    });
+  });
+  clean.savingsAccounts = (clean.savingsAccounts || []).map((a) => ({
+    ...a,
+    previous: a.previous ?? a.current ?? 0,
+    current: Number(a.current || 0),
+    monthly: Number(a.monthly || 0),
+    deposits: a.deposits || [],
+  }));
+  return clean;
+}
 
 function loadData() {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-    return saved ? JSON.parse(saved) : defaultData;
+    return saved ? migrateData(JSON.parse(saved)) : defaultData;
   } catch {
     return defaultData;
   }
@@ -114,6 +162,9 @@ export default function App() {
     monthly: "",
   });
   const [categoryName, setCategoryName] = useState("");
+  const [expenseSearch, setExpenseSearch] = useState("");
+  const [expenseCategoryFilter, setExpenseCategoryFilter] = useState("All");
+  const [expensePersonFilter, setExpensePersonFilter] = useState("All");
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
@@ -122,16 +173,31 @@ export default function App() {
   const month = data.selectedMonth;
   const monthExpenses = data.expenses[month] || [];
   const monthIncome = data.income[month] || [];
+  const monthBudgets = data.budgets?.[month] || {};
+
+  const actualDepositsThisMonth = useMemo(() => {
+    return data.savingsAccounts.reduce((sum, account) => {
+      const deposits = account.deposits || [];
+      return (
+        sum +
+        deposits
+          .filter((d) => d.month === month && d.kind !== "balance-edit")
+          .reduce((s, d) => s + Number(d.amount || 0), 0)
+      );
+    }, 0);
+  }, [data.savingsAccounts, month]);
 
   const totals = useMemo(() => {
     const totalIncome = monthIncome.reduce((s, i) => s + Number(i.amount || 0), 0);
     const totalSpent = monthExpenses.reduce((s, e) => s + Number(e.amount || 0), 0);
     const totalCurrent = data.savingsAccounts.reduce((s, a) => s + Number(a.current || 0), 0);
     const monthlySavings = data.savingsAccounts.reduce((s, a) => s + Number(a.monthly || 0), 0);
+    const totalBudget = Object.values(monthBudgets).reduce((s, b) => s + Number(b || 0), 0);
     const progress = Math.min(100, Math.round((totalCurrent / data.targetNetWorth) * 100));
     const remaining = data.targetNetWorth - totalCurrent;
-    return { totalIncome, totalSpent, totalCurrent, monthlySavings, progress, remaining };
-  }, [data, monthExpenses, monthIncome]);
+    const cashRemaining = totalIncome - totalSpent - actualDepositsThisMonth;
+    return { totalIncome, totalSpent, totalCurrent, monthlySavings, totalBudget, progress, remaining, cashRemaining };
+  }, [data, monthExpenses, monthIncome, monthBudgets, actualDepositsThisMonth]);
 
   const analytics = useMemo(() => {
     const byCategory = {};
@@ -150,18 +216,33 @@ export default function App() {
     const topCategory = Object.entries(byCategory).sort((a, b) => b[1] - a[1])[0] || null;
     const topPlaces = Object.entries(byPlace).sort((a, b) => b[1] - a[1]).slice(0, 5);
     const topPerson = Object.entries(byWho).sort((a, b) => b[1] - a[1])[0] || null;
+    const topExpenses = [...monthExpenses].sort((a, b) => Number(b.amount) - Number(a.amount)).slice(0, 10);
     const coffeeAsh = entriesByPersonCategory["Ashleigh-Coffee"] || 0;
     const coffeeChade = entriesByPersonCategory["Chade-Coffee"] || 0;
     const takeoutAsh = entriesByPersonCategory["Ashleigh-Take Out"] || 0;
     const takeoutChade = entriesByPersonCategory["Chade-Take Out"] || 0;
 
-    return { byCategory, byPlace, byWho, topCategory, topPlaces, topPerson, coffeeAsh, coffeeChade, takeoutAsh, takeoutChade };
+    return { byCategory, byPlace, byWho, topCategory, topPlaces, topPerson, topExpenses, coffeeAsh, coffeeChade, takeoutAsh, takeoutChade };
   }, [monthExpenses]);
+
+  const filteredExpenses = useMemo(() => {
+    const q = expenseSearch.toLowerCase().trim();
+    return monthExpenses.filter((e) => {
+      const matchesSearch = !q || `${e.date} ${e.who} ${e.place} ${e.category} ${e.amount}`.toLowerCase().includes(q);
+      const matchesCategory = expenseCategoryFilter === "All" || e.category === expenseCategoryFilter;
+      const matchesPerson = expensePersonFilter === "All" || e.who === expensePersonFilter;
+      return matchesSearch && matchesCategory && matchesPerson;
+    });
+  }, [monthExpenses, expenseSearch, expenseCategoryFilter, expensePersonFilter]);
 
   const todaysVerse = bibleVerses[Math.floor(Date.now() / 86400000) % bibleVerses.length];
 
   function savePatch(patch) {
     setData((prev) => ({ ...prev, ...patch }));
+  }
+
+  function scrollToSection(id) {
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   function addExpense() {
@@ -183,12 +264,7 @@ export default function App() {
   }
 
   function deleteIncome(id) {
-    savePatch({
-      income: {
-        ...data.income,
-        [month]: monthIncome.filter((i) => i.id !== id),
-      },
-    });
+    savePatch({ income: { ...data.income, [month]: monthIncome.filter((i) => i.id !== id) } });
   }
 
   function addSavingsAccount() {
@@ -215,10 +291,8 @@ export default function App() {
 
     const updatedAccounts = data.savingsAccounts.map((account) => {
       if (account.id !== accountId) return account;
-
       const previousBalance = Number(account.current || 0);
       const newBalance = previousBalance + amount;
-
       return {
         ...account,
         previous: previousBalance,
@@ -227,6 +301,8 @@ export default function App() {
           {
             id: Date.now(),
             date: new Date().toISOString().slice(0, 10),
+            month,
+            kind: "deposit",
             amount,
             note,
             previousBalance,
@@ -240,22 +316,76 @@ export default function App() {
     savePatch({ savingsAccounts: updatedAccounts });
   }
 
+  function editAccountBalance(accountId, newBalanceValue) {
+    const newBalance = Number(newBalanceValue || 0);
+    if (newBalance < 0) return alert("Balance cannot be negative.");
+
+    const updatedAccounts = data.savingsAccounts.map((account) => {
+      if (account.id !== accountId) return account;
+      const previousBalance = Number(account.current || 0);
+      const difference = newBalance - previousBalance;
+      return {
+        ...account,
+        previous: previousBalance,
+        current: newBalance,
+        deposits: [
+          {
+            id: Date.now(),
+            date: new Date().toISOString().slice(0, 10),
+            month,
+            kind: "balance-edit",
+            amount: difference,
+            note: "Balance edited for interest/adjustment",
+            previousBalance,
+            newBalance,
+          },
+          ...(account.deposits || []),
+        ],
+      };
+    });
+
+    savePatch({ savingsAccounts: updatedAccounts });
+  }
+
+  function updateBudget(category, value) {
+    savePatch({
+      budgets: {
+        ...data.budgets,
+        [month]: {
+          ...(data.budgets?.[month] || {}),
+          [category]: Number(value || 0),
+        },
+      },
+    });
+  }
+
   function addCategory() {
     const name = categoryName.trim();
     if (!name) return;
     if (data.categories.includes(name)) return alert("This category already exists.");
-    savePatch({ categories: [...data.categories, name] });
+    savePatch({
+      categories: [...data.categories, name],
+      budgets: {
+        ...data.budgets,
+        [month]: {
+          ...(data.budgets?.[month] || {}),
+          [name]: 0,
+        },
+      },
+    });
     setCategoryName("");
   }
 
   function createMonth() {
     const newMonth = prompt("Enter the new month, e.g. June 2026");
     if (!newMonth) return;
+    const previousBudget = data.budgets?.[month] || {};
     savePatch({
       selectedMonth: newMonth,
       months: data.months.includes(newMonth) ? data.months : [...data.months, newMonth],
       expenses: { ...data.expenses, [newMonth]: data.expenses[newMonth] || [] },
       income: { ...data.income, [newMonth]: data.income[newMonth] || [] },
+      budgets: { ...data.budgets, [newMonth]: data.budgets?.[newMonth] || previousBudget },
     });
   }
 
@@ -269,18 +399,18 @@ export default function App() {
 
       <aside className="sideNav">
         <div className="sideLogo"><Heart size={28} /></div>
-        <NavIcon icon={<Home />} label="Dashboard" active />
-        <NavIcon icon={<PiggyBank />} label="Savings" />
-        <NavIcon icon={<ReceiptText />} label="Expenses" />
-        <NavIcon icon={<Wallet />} label="Income" />
-        <NavIcon icon={<BarChart3 />} label="Analytics" />
-        <NavIcon icon={<Calendar />} label="Months" />
-        <NavIcon icon={<Settings />} label="Settings" />
+        <NavIcon icon={<Home />} label="Dashboard" active onClick={() => scrollToSection("dashboard")} />
+        <NavIcon icon={<PiggyBank />} label="Savings" onClick={() => scrollToSection("savings")} />
+        <NavIcon icon={<ReceiptText />} label="Expenses" onClick={() => scrollToSection("expenses")} />
+        <NavIcon icon={<Wallet />} label="Income" onClick={() => scrollToSection("income")} />
+        <NavIcon icon={<BarChart3 />} label="Analytics" onClick={() => scrollToSection("analytics")} />
+        <NavIcon icon={<Calendar />} label="Months" onClick={() => scrollToSection("history")} />
+        <NavIcon icon={<Settings />} label="Settings" onClick={() => scrollToSection("settings")} />
         <div className="sideBottom">You got this 🤎</div>
       </aside>
 
       <main className="mainContent">
-        <header className="topHeader">
+        <header className="topHeader" id="dashboard">
           <div>
             <h1>Our 10 Year Plan</h1>
             <p>Building our future together 🤎</p>
@@ -324,13 +454,13 @@ export default function App() {
 
             <div className="goalFacts">
               <Fact icon={<Calendar />} label="Target Date" value={data.targetDate} />
-              <Fact icon={<Users />} label="Monthly Saving Together" value={money(totals.monthlySavings)} />
-              <Fact icon={<TrendingUp />} label="Projected Interest" value="± R900k+" />
+              <Fact icon={<Users />} label="Monthly Saving Target" value={money(totals.monthlySavings)} />
+              <Fact icon={<TrendingUp />} label="Actual Deposited This Month" value={money(actualDepositsThisMonth)} />
             </div>
           </div>
         </section>
 
-        <section className="grid threeCols">
+        <section className="grid threeCols" id="income">
           <Panel title="Income / Salary" icon={<Wallet />}>
             <div className="bigNumber">{money(totals.totalIncome)}</div>
             <p className="muted">Total income for {month}</p>
@@ -356,11 +486,13 @@ export default function App() {
             </div>
           </Panel>
 
-          <SavingsPanel title="Her Savings" owner="Ashleigh" accounts={ownerAccounts("Ashleigh")} onDelete={deleteAccount} onAddDeposit={addDepositToAccount} />
-          <SavingsPanel title="His Savings" owner="Chade" accounts={ownerAccounts("Chade")} onDelete={deleteAccount} onAddDeposit={addDepositToAccount} />
+          <div id="savings" className="anchorWrap">
+            <SavingsPanel title="Her Savings" owner="Ashleigh" accounts={ownerAccounts("Ashleigh")} onDelete={deleteAccount} onAddDeposit={addDepositToAccount} onEditBalance={editAccountBalance} />
+          </div>
+          <SavingsPanel title="His Savings" owner="Chade" accounts={ownerAccounts("Chade")} onDelete={deleteAccount} onAddDeposit={addDepositToAccount} onEditBalance={editAccountBalance} />
         </section>
 
-        <section className="grid twoCols">
+        <section className="grid twoCols" id="settings">
           <Panel title="Add New Savings Account" icon={<Landmark />}>
             <div className="formGrid twoColForm">
               <select value={accountForm.owner} onChange={(e) => setAccountForm({ ...accountForm, owner: e.target.value })}>
@@ -371,38 +503,48 @@ export default function App() {
               </select>
               <input value={accountForm.name} onChange={(e) => setAccountForm({ ...accountForm, name: e.target.value })} placeholder="Account name" />
               <input value={accountForm.current} onChange={(e) => setAccountForm({ ...accountForm, current: e.target.value })} placeholder="Current balance" type="number" />
-              <input value={accountForm.monthly} onChange={(e) => setAccountForm({ ...accountForm, monthly: e.target.value })} placeholder="Monthly contribution" type="number" />
+              <input value={accountForm.monthly} onChange={(e) => setAccountForm({ ...accountForm, monthly: e.target.value })} placeholder="Monthly target" type="number" />
               <button onClick={addSavingsAccount}><Plus size={16} /> Add Account</button>
             </div>
           </Panel>
 
-          <Panel title="Add Expense Category" icon={<Settings />}>
+          <Panel title="Budget Categories + Planned Budget" icon={<Settings />}>
             <div className="inlineForm">
               <input value={categoryName} onChange={(e) => setCategoryName(e.target.value)} placeholder="e.g. Padel, Beauty, Date Night" />
               <button onClick={addCategory}>Add</button>
             </div>
-            <div className="chipWrap">
-              {data.categories.map((c) => <span key={c}>{c}</span>)}
+            <div className="budgetEditor">
+              {data.categories.map((c) => (
+                <div key={c}>
+                  <span>{c}</span>
+                  <input type="number" value={monthBudgets[c] || ""} onChange={(e) => updateBudget(c, e.target.value)} placeholder="Budget" />
+                </div>
+              ))}
             </div>
           </Panel>
         </section>
 
-        <section className="grid twoCols">
+        <section className="grid twoCols" id="expenses">
           <Panel title="Expenses Overview" icon={<ReceiptText />}>
             <div className="expenseOverview">
               <div className="spentBox">
                 <p>Total Spent</p>
                 <h2>{money(totals.totalSpent)}</h2>
-                <span>Remaining after income, savings and spending:</span>
-                <strong>{money(totals.totalIncome - totals.totalSpent - totals.monthlySavings)}</strong>
+                <span>Actual manual savings deposits this month:</span>
+                <strong>{money(actualDepositsThisMonth)}</strong>
+                <span className="secondSpan">Remaining after income, actual deposits and spending:</span>
+                <strong>{money(totals.cashRemaining)}</strong>
               </div>
-              <div className="categoryBars">
-                {Object.entries(analytics.byCategory).map(([cat, amount]) => (
-                  <div key={cat}>
-                    <div className="barTop"><span>{cat}</span><strong>{money(amount)}</strong></div>
-                    <div className="barTrack small"><div className="barFill" style={{ width: `${Math.min(100, (amount / Math.max(totals.totalSpent, 1)) * 100)}%` }} /></div>
-                  </div>
-                ))}
+              <div className="categoryBars scrollBox">
+                {Object.entries(analytics.byCategory)
+                  .sort((a, b) => b[1] - a[1])
+                  .slice(0, 10)
+                  .map(([cat, amount]) => (
+                    <div key={cat}>
+                      <div className="barTop"><span>{cat}</span><strong>{money(amount)}</strong></div>
+                      <div className="barTrack small"><div className="barFill" style={{ width: `${Math.min(100, (amount / Math.max(totals.totalSpent, 1)) * 100)}%` }} /></div>
+                    </div>
+                  ))}
               </div>
             </div>
 
@@ -420,6 +562,31 @@ export default function App() {
             </div>
           </Panel>
 
+          <Panel title="Budget Planned vs Actual" icon={<BarChart3 />}>
+            <div className="budgetSummaryGrid">
+              <MiniStat title="Planned Budget" value={money(totals.totalBudget)} />
+              <MiniStat title="Actual Spent" value={money(totals.totalSpent)} />
+              <MiniStat title="Budget Left" value={money(totals.totalBudget - totals.totalSpent)} />
+            </div>
+            <div className="budgetVisualList scrollBox tall">
+              {data.categories.map((cat) => {
+                const planned = Number(monthBudgets[cat] || 0);
+                const actual = Number(analytics.byCategory[cat] || 0);
+                const percent = planned > 0 ? Math.min(140, (actual / planned) * 100) : actual > 0 ? 100 : 0;
+                const over = planned > 0 && actual > planned;
+                return (
+                  <div key={cat} className="budgetLine">
+                    <div className="barTop"><span>{cat}</span><strong>{money(actual)} / {money(planned)}</strong></div>
+                    <div className="barTrack small"><div className={over ? "barFill danger" : "barFill"} style={{ width: `${Math.min(100, percent)}%` }} /></div>
+                    {over && <p className="overText">Overspent by {money(actual - planned)}</p>}
+                  </div>
+                );
+              })}
+            </div>
+          </Panel>
+        </section>
+
+        <section className="grid twoCols" id="analytics">
           <Panel title="Expense Analytics" icon={<BarChart3 />}>
             <div className="analyticsGrid">
               <Insight title="Where you spend the most" text={analytics.topCategory ? `${analytics.topCategory[0]} — ${money(analytics.topCategory[1])}` : "No expenses yet"} />
@@ -440,15 +607,37 @@ export default function App() {
                 : "Add expenses and your monthly insight will appear here."}
             </div>
           </Panel>
+
+          <Panel title="Top 10 Highest Expenses" icon={<ReceiptText />}>
+            <div className="topExpenseList scrollBox tall">
+              {analytics.topExpenses.map((e, index) => (
+                <div className="topExpenseRow" key={e.id}>
+                  <span>{index + 1}</span>
+                  <div><strong>{e.place}</strong><p>{e.category} • {e.who} • {e.date}</p></div>
+                  <b>{money(e.amount)}</b>
+                </div>
+              ))}
+            </div>
+          </Panel>
         </section>
 
-        <section className="grid twoCols">
+        <section className="grid twoCols" id="history">
           <Panel title="Recent Expenses" icon={<Coffee />}>
-            <div className="tableWrap">
+            <div className="filtersRow">
+              <div className="searchBox"><Search size={16} /><input value={expenseSearch} onChange={(e) => setExpenseSearch(e.target.value)} placeholder="Search place, category, person..." /></div>
+              <select value={expenseCategoryFilter} onChange={(e) => setExpenseCategoryFilter(e.target.value)}>
+                <option>All</option>{data.categories.map((c) => <option key={c}>{c}</option>)}
+              </select>
+              <select value={expensePersonFilter} onChange={(e) => setExpensePersonFilter(e.target.value)}>
+                <option>All</option><option>Ashleigh</option><option>Chade</option><option>Joint</option>
+              </select>
+            </div>
+            <p className="muted"><Filter size={14} /> Showing first 10 of {filteredExpenses.length} matching entries</p>
+            <div className="tableWrap limitedTable">
               <table>
                 <thead><tr><th>Date</th><th>Place</th><th>Category</th><th>Who</th><th>Amount</th><th></th></tr></thead>
                 <tbody>
-                  {monthExpenses.map((e) => (
+                  {filteredExpenses.slice(0, 10).map((e) => (
                     <tr key={e.id}>
                       <td>{e.date}</td><td>{e.place}</td><td>{e.category}</td><td>{e.who}</td><td>{money(e.amount)}</td>
                       <td><button className="trash" onClick={() => deleteExpense(e.id)}><Trash2 size={15} /></button></td>
@@ -462,12 +651,13 @@ export default function App() {
           <Panel title="Monthly History" icon={<Calendar />}>
             <div className="tableWrap">
               <table>
-                <thead><tr><th>Month</th><th>Income</th><th>Spent</th><th>Saved Target</th></tr></thead>
+                <thead><tr><th>Month</th><th>Income</th><th>Spent</th><th>Manual Deposits</th></tr></thead>
                 <tbody>
                   {data.months.map((m) => {
                     const inc = (data.income[m] || []).reduce((s, i) => s + Number(i.amount || 0), 0);
                     const exp = (data.expenses[m] || []).reduce((s, e) => s + Number(e.amount || 0), 0);
-                    return <tr key={m}><td>{m}</td><td>{money(inc)}</td><td>{money(exp)}</td><td>{money(totals.monthlySavings)}</td></tr>;
+                    const dep = data.savingsAccounts.reduce((sum, account) => sum + (account.deposits || []).filter((d) => d.month === m && d.kind !== "balance-edit").reduce((s, d) => s + Number(d.amount || 0), 0), 0);
+                    return <tr key={m}><td>{m}</td><td>{money(inc)}</td><td>{money(exp)}</td><td>{money(dep)}</td></tr>;
                   })}
                 </tbody>
               </table>
@@ -485,8 +675,8 @@ export default function App() {
   );
 }
 
-function NavIcon({ icon, label, active }) {
-  return <div className={`navIcon ${active ? "active" : ""}`} title={label}>{icon}<small>{label}</small></div>;
+function NavIcon({ icon, label, active, onClick }) {
+  return <button className={`navIcon ${active ? "active" : ""}`} title={label} onClick={onClick}>{icon}<small>{label}</small></button>;
 }
 
 function Panel({ title, icon, children }) {
@@ -510,13 +700,18 @@ function Insight({ title, text }) {
   return <div className="insight"><p>{title}</p><strong>{text}</strong></div>;
 }
 
-function SavingsPanel({ title, accounts, onDelete, onAddDeposit }) {
+function SavingsPanel({ title, accounts, onDelete, onAddDeposit, onEditBalance }) {
   const total = accounts.reduce((s, a) => s + Number(a.current || 0), 0);
   const monthly = accounts.reduce((s, a) => s + Number(a.monthly || 0), 0);
   const [depositInputs, setDepositInputs] = useState({});
+  const [balanceInputs, setBalanceInputs] = useState({});
 
   const updateInput = (accountId, value) => {
     setDepositInputs((prev) => ({ ...prev, [accountId]: value }));
+  };
+
+  const updateBalanceInput = (accountId, value) => {
+    setBalanceInputs((prev) => ({ ...prev, [accountId]: value }));
   };
 
   const submitDeposit = (accountId) => {
@@ -524,18 +719,25 @@ function SavingsPanel({ title, accounts, onDelete, onAddDeposit }) {
     setDepositInputs((prev) => ({ ...prev, [accountId]: "" }));
   };
 
+  const submitBalanceEdit = (accountId, currentBalance) => {
+    const value = balanceInputs[accountId];
+    if (value === undefined || value === "") return alert("Enter the updated balance first.");
+    onEditBalance(accountId, value);
+    setBalanceInputs((prev) => ({ ...prev, [accountId]: "" }));
+  };
+
   return (
     <Panel title={title} icon={<PiggyBank />}>
       <div className="savingSummary">
         <MiniStat title="Total Balance" value={money(total)} />
-        <MiniStat title="Monthly" value={money(monthly)} />
+        <MiniStat title="Monthly Target" value={money(monthly)} />
       </div>
       <div className="accountsList">
         {accounts.map((a) => {
           const previous = Number(a.previous ?? a.current ?? 0);
           const current = Number(a.current || 0);
           const difference = current - previous;
-          const latestDeposit = (a.deposits || [])[0];
+          const latestMovement = (a.deposits || [])[0];
 
           return (
             <div className="accountRow expanded" key={a.id}>
@@ -575,9 +777,19 @@ function SavingsPanel({ title, accounts, onDelete, onAddDeposit }) {
                 <button onClick={() => submitDeposit(a.id)}>Add Deposit</button>
               </div>
 
-              {latestDeposit && (
+              <div className="depositLine balanceEditLine">
+                <input
+                  type="number"
+                  placeholder="Edit current balance for interest"
+                  value={balanceInputs[a.id] || ""}
+                  onChange={(e) => updateBalanceInput(a.id, e.target.value)}
+                />
+                <button onClick={() => submitBalanceEdit(a.id, current)}><Pencil size={14} /> Save Balance</button>
+              </div>
+
+              {latestMovement && (
                 <div className="latestDeposit">
-                  Last deposit: {money(latestDeposit.amount)} on {latestDeposit.date} • Balance moved from {money(latestDeposit.previousBalance)} to {money(latestDeposit.newBalance)}
+                  Last update: {latestMovement.kind === "balance-edit" ? "Balance edit" : "Deposit"} of {money(latestMovement.amount)} on {latestMovement.date} • Balance moved from {money(latestMovement.previousBalance)} to {money(latestMovement.newBalance)}
                 </div>
               )}
             </div>
@@ -598,13 +810,13 @@ select:focus, input:focus { border-color: #7a3f20; box-shadow: 0 0 0 4px rgba(12
 .appShell { min-height: 100vh; background: radial-gradient(circle at top left, #fff 0, #f8f3ee 34%, #f2e6dd 100%); }
 .sideNav { position: fixed; inset: 0 auto 0 0; width: 92px; background: linear-gradient(180deg, #3a1709, #6f3518); color: #fff7f0; display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 24px 10px; z-index: 5; box-shadow: 10px 0 25px rgba(87,43,23,.12); }
 .sideLogo { width: 52px; height: 52px; border-radius: 20px; display: grid; place-items: center; background: rgba(255,255,255,.08); margin-bottom: 10px; }
-.navIcon { width: 70px; min-height: 58px; border-radius: 18px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; color: #f7e7dc; opacity: .85; }
+.navIcon { width: 70px; min-height: 58px; border-radius: 18px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; color: #f7e7dc; opacity: .85; background: transparent; }
 .navIcon svg { width: 21px; height: 21px; }
 .navIcon small { font-size: 10px; font-weight: 700; }
 .navIcon.active, .navIcon:hover { background: rgba(255,255,255,.13); opacity: 1; }
 .sideBottom { margin-top: auto; font-size: 11px; text-align: center; background: rgba(255,255,255,.09); padding: 12px 8px; border-radius: 16px; }
 .mainContent { margin-left: 92px; padding: 28px; max-width: 1500px; }
-.topHeader { display: flex; justify-content: space-between; align-items: center; gap: 20px; margin-bottom: 24px; }
+.topHeader { display: flex; justify-content: space-between; align-items: center; gap: 20px; margin-bottom: 24px; scroll-margin-top: 20px; }
 .topHeader h1 { margin: 0; font-size: 30px; letter-spacing: -0.03em; }
 .topHeader p { margin: 6px 0 0; color: #7a5845; }
 .headerActions { display: flex; gap: 12px; align-items: center; }
@@ -628,6 +840,7 @@ select:focus, input:focus { border-color: #7a3f20; box-shadow: 0 0 0 4px rgba(12
 .barTrack { height: 14px; width: 100%; background: #ecdccf; border-radius: 999px; overflow: hidden; }
 .barTrack.small { height: 9px; margin-top: 5px; }
 .barFill { height: 100%; background: linear-gradient(90deg, #7a3f20, #b77850); border-radius: 999px; }
+.barFill.danger { background: linear-gradient(90deg, #a3341e, #d4704f); }
 .projectionBox h3 { margin: 0 0 12px; font-size: 15px; color: #5b2b15; }
 .fakeChart { height: 190px; border-left: 1px solid #ead9cd; border-bottom: 1px solid #ead9cd; background: repeating-linear-gradient(0deg, transparent, transparent 45px, rgba(122,63,32,.08) 46px); border-radius: 16px; position: relative; overflow: hidden; }
 .chartLine { position: absolute; height: 4px; border-radius: 999px; transform-origin: left center; left: 35px; }
@@ -641,11 +854,12 @@ select:focus, input:focus { border-color: #7a3f20; box-shadow: 0 0 0 4px rgba(12
 .fact svg { color: #7a3f20; width: 21px; }
 .fact p { margin: 0 0 3px; color: #7a5845; font-size: 12px; }
 .fact strong { font-size: 15px; }
-.grid { display: grid; gap: 22px; margin-bottom: 22px; }
+.grid { display: grid; gap: 22px; margin-bottom: 22px; scroll-margin-top: 20px; }
+.anchorWrap { scroll-margin-top: 20px; }
 .threeCols { grid-template-columns: 1fr 1fr 1fr; }
 .twoCols { grid-template-columns: 1fr 1fr; }
 .bigNumber { font-size: 35px; font-weight: 950; letter-spacing: -0.04em; color: #552713; }
-.muted { color: #7a5845; font-size: 13px; margin: 4px 0 14px; }
+.muted { color: #7a5845; font-size: 13px; margin: 4px 0 14px; display: flex; align-items: center; gap: 6px; }
 .donutAndList { display: flex; gap: 16px; align-items: center; margin: 18px 0; }
 .miniDonut { width: 95px; height: 95px; border-radius: 50%; background: conic-gradient(#7a3f20 50%, #be8e6b 50%); border: 16px solid #f5e6dc; }
 .smallList { flex: 1; display: grid; gap: 8px; }
@@ -654,13 +868,15 @@ select:focus, input:focus { border-color: #7a3f20; box-shadow: 0 0 0 4px rgba(12
 .formGrid { display: grid; gap: 10px; }
 .oneCol { grid-template-columns: 1fr; }
 .twoColForm { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.savingSummary { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
+.savingSummary, .budgetSummaryGrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 14px; }
+.budgetSummaryGrid { grid-template-columns: repeat(3, 1fr); }
 .accountsList { display: grid; gap: 10px; }
 .accountRow { display: flex; justify-content: space-between; align-items: center; gap: 14px; border: 1px solid #ead9cd; border-radius: 18px; padding: 14px; background: #fff; }
 .accountRow.expanded { display: block; }
 .accountMainLine { display: flex; justify-content: space-between; align-items: center; gap: 14px; }
 .accountRow p { margin: 4px 0 0; color: #7a5845; font-size: 12px; }
 .accountRight { display: flex; align-items: center; gap: 10px; text-align: right; }
+.accountRight button, .trash { color: #7a3f20; background: #f7eee8; border-radius: 10px; padding: 8px; display: grid; place-items: center; }
 .balanceCompare { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 12px; }
 .balanceCompare div { background: #f7eee8; border: 1px solid #efdfd4; border-radius: 14px; padding: 10px; }
 .balanceCompare span { display: block; color: #7a5845; font-size: 11px; font-weight: 800; text-transform: uppercase; margin-bottom: 4px; }
@@ -668,20 +884,24 @@ select:focus, input:focus { border-color: #7a3f20; box-shadow: 0 0 0 4px rgba(12
 .positiveChange strong { color: #2f7d32; }
 .negativeChange strong { color: #b3261e; }
 .depositLine { display: grid; grid-template-columns: 1fr auto; gap: 10px; margin-top: 12px; }
-.depositLine button { background: #7a3f20; color: white; padding: 11px 14px; border-radius: 14px; font-weight: 900; }
+.depositLine button { background: #7a3f20; color: white; padding: 11px 14px; border-radius: 14px; font-weight: 900; display: inline-flex; align-items: center; gap: 7px; }
+.balanceEditLine button { background: #5f3521; }
 .latestDeposit { margin-top: 10px; background: #fff8f3; border-left: 4px solid #7a3f20; border-radius: 12px; padding: 10px; color: #6d4b3a; font-size: 12px; font-weight: 700; }
-.accountRight button, .trash { color: #7a3f20; background: #f7eee8; border-radius: 10px; padding: 8px; display: grid; place-items: center; }
 .inlineForm { display: flex; gap: 10px; }
 .inlineForm button { min-width: 100px; }
-.chipWrap { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
-.chipWrap span { background: #f1e1d5; border: 1px solid #e4cdbd; border-radius: 999px; padding: 8px 12px; color: #5b2b15; font-size: 13px; font-weight: 700; }
+.budgetEditor { margin-top: 16px; display: grid; gap: 10px; max-height: 340px; overflow-y: auto; padding-right: 8px; }
+.budgetEditor div { display: grid; grid-template-columns: 1fr 140px; gap: 10px; align-items: center; background: #fff8f3; border: 1px solid #ead9cd; border-radius: 14px; padding: 10px; }
+.budgetEditor span { font-weight: 800; color: #5b2b15; }
 .expenseOverview { display: grid; grid-template-columns: 230px 1fr; gap: 18px; }
 .spentBox { background: #f7eee8; border-radius: 22px; padding: 18px; border: 1px solid #efdfd4; }
 .spentBox p { margin: 0; color: #7a5845; font-size: 13px; }
 .spentBox h2 { margin: 8px 0 12px; font-size: 34px; letter-spacing: -0.04em; }
 .spentBox span { display: block; color: #7a5845; font-size: 13px; margin-bottom: 6px; }
+.spentBox .secondSpan { margin-top: 13px; }
 .spentBox strong { font-size: 18px; }
 .categoryBars { display: grid; gap: 11px; align-content: start; }
+.scrollBox { max-height: 280px; overflow-y: auto; padding-right: 8px; }
+.scrollBox.tall { max-height: 360px; }
 .barTop { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
 .addExpenseGrid { display: grid; grid-template-columns: 1fr 1fr 1.3fr 1fr 1fr; gap: 10px; margin-top: 18px; }
 .addExpenseGrid button { grid-column: 1 / -1; }
@@ -693,7 +913,18 @@ select:focus, input:focus { border-color: #7a3f20; box-shadow: 0 0 0 4px rgba(12
 .topPlaces h4 { margin: 0 0 10px; }
 .topPlaces div { display: flex; justify-content: space-between; padding: 8px 0; border-top: 1px solid #ead9cd; }
 .monthInsight { margin-top: 14px; border-left: 4px solid #7a3f20; background: #fff8f3; padding: 14px; border-radius: 16px; color: #5b2b15; font-weight: 700; }
+.topExpenseList { display: grid; gap: 10px; }
+.topExpenseRow { display: grid; grid-template-columns: 32px 1fr auto; align-items: center; gap: 12px; background: #fff8f3; border: 1px solid #ead9cd; border-radius: 16px; padding: 12px; }
+.topExpenseRow > span { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 10px; background: #7a3f20; color: white; font-weight: 900; }
+.topExpenseRow p { margin: 4px 0 0; color: #7a5845; font-size: 12px; }
+.budgetVisualList { display: grid; gap: 13px; }
+.budgetLine { background: #fff8f3; border: 1px solid #ead9cd; border-radius: 16px; padding: 12px; }
+.overText { color: #a3341e; font-size: 12px; font-weight: 900; margin: 6px 0 0; }
+.filtersRow { display: grid; grid-template-columns: 1.5fr 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+.searchBox { display: flex; align-items: center; gap: 8px; border: 1px solid #dec7b8; border-radius: 16px; padding: 0 12px; background: white; }
+.searchBox input { border: none; box-shadow: none !important; padding-left: 4px; }
 .tableWrap { overflow-x: auto; }
+.limitedTable { max-height: 520px; overflow-y: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th { text-align: left; color: #7a5845; font-size: 12px; padding: 10px; }
 td { padding: 12px 10px; border-top: 1px solid #ead9cd; }
@@ -714,6 +945,6 @@ tbody tr:hover { background: #fff8f3; }
   .headerActions { flex-direction: column; align-items: stretch; }
   .goalGrid { grid-template-columns: 1fr; }
   .expenseOverview { grid-template-columns: 1fr; }
-  .analyticsGrid, .savingSummary, .twoColForm, .addExpenseGrid { grid-template-columns: 1fr; }
+  .analyticsGrid, .savingSummary, .budgetSummaryGrid, .twoColForm, .addExpenseGrid, .filtersRow, .balanceCompare, .depositLine { grid-template-columns: 1fr; }
 }
 `;
