@@ -1,724 +1,474 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { initializeApp } from "firebase/app";
 import {
-  getAuth,
-  onAuthStateChanged,
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  signOut,
-} from "firebase/auth";
-import {
-  getFirestore,
-  collection,
-  addDoc,
-  deleteDoc,
-  doc,
-  onSnapshot,
-  orderBy,
-  query,
-  serverTimestamp,
-  setDoc,
-} from "firebase/firestore";
+  BarChart3,
+  Calendar,
+  Coffee,
+  Heart,
+  Home,
+  PiggyBank,
+  Plus,
+  Settings,
+  Target,
+  Trash2,
+  Wallet,
+} from "lucide-react";
 
-const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+const currency = (value) =>
+  new Intl.NumberFormat("en-ZA", {
+    style: "currency",
+    currency: "ZAR",
+    maximumFractionDigits: 0,
+  }).format(Number(value || 0));
+
+const STORAGE_KEY = "ten-year-plan-dashboard-v1";
+
+const bibleVerses = [
+  "Proverbs 16:3 — Commit to the Lord whatever you do, and he will establish your plans.",
+  "Jeremiah 29:11 — For I know the plans I have for you, declares the Lord.",
+  "Proverbs 21:5 — The plans of the diligent lead to profit as surely as haste leads to poverty.",
+  "Matthew 6:21 — For where your treasure is, there your heart will be also.",
+  "Philippians 4:19 — And my God will meet all your needs according to the riches of his glory.",
+  "Luke 14:28 — Suppose one of you wants to build a tower. Won’t you first sit down and estimate the cost?",
+  "Psalm 37:5 — Commit your way to the Lord; trust in him and he will do this.",
+];
+
+const defaultData = {
+  selectedMonth: "May 2026",
+  months: ["May 2026"],
+  income: {
+    "May 2026": [
+      { id: 1, who: "Ashleigh", source: "Salary", amount: 22000 },
+      { id: 2, who: "Chade", source: "Salary", amount: 22000 },
+    ],
+  },
+  categories: ["Rent", "Groceries", "Fuel", "Utilities", "Insurance", "Subscriptions", "Coffee", "Take Out", "Medical", "Other"],
+  expenses: {
+    "May 2026": [
+      { id: 1, date: "2026-05-01", who: "Joint", place: "Rent", category: "Rent", amount: 8000 },
+      { id: 2, date: "2026-05-03", who: "Ashleigh", place: "Woolworths", category: "Groceries", amount: 356 },
+      { id: 3, date: "2026-05-04", who: "Chade", place: "Vida e Caffè", category: "Coffee", amount: 72 },
+      { id: 4, date: "2026-05-05", who: "Ashleigh", place: "Uber Eats", category: "Take Out", amount: 210 },
+      { id: 5, date: "2026-05-06", who: "Chade", place: "Shell", category: "Fuel", amount: 600 },
+    ],
+  },
+  savingsAccounts: [
+    { id: 1, owner: "Ashleigh", name: "TFSA - Allan Gray", type: "TFSA", current: 4000, monthly: 3000 },
+    { id: 2, owner: "Ashleigh", name: "FNB 32-Day Account", type: "Deposit", current: 8000, monthly: 2500 },
+    { id: 3, owner: "Ashleigh", name: "FNB 1-Year Fixed Deposit", type: "Deposit", current: 10000, monthly: 2500 },
+    { id: 4, owner: "Chade", name: "TFSA - FNB", type: "TFSA", current: 909, monthly: 3000 },
+    { id: 5, owner: "Chade", name: "FNB 32-Day Account", type: "Deposit", current: 0, monthly: 2500 },
+    { id: 6, owner: "Chade", name: "FNB 1-Year Fixed Deposit", type: "Deposit", current: 0, monthly: 2500 },
+  ],
+  targetNetWorth: 2830000,
+  monthlySavingsTarget: 16000,
 };
 
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-
-const APP_NAME = "Ashleigh and Chade";
-const COUPLE_ID = "ashleigh-and-chade";
-
-const defaultCategories = [
-  { name: "Groceries", planned: 3000, temporary: false, color: "#22c55e" },
-  { name: "Eating Out", planned: 1000, temporary: false, color: "#f97316" },
-  { name: "Fuel", planned: 2000, temporary: false, color: "#f59e0b" },
-  { name: "Rent/Bond", planned: 6000, temporary: false, color: "#3b82f6" },
-  { name: "Utilities", planned: 1500, temporary: false, color: "#8b5cf6" },
-  { name: "Subscriptions", planned: 500, temporary: false, color: "#6366f1" },
-  { name: "Date Night", planned: 800, temporary: false, color: "#ec4899" },
-  { name: "Medical", planned: 500, temporary: false, color: "#ef4444" },
-  { name: "Savings", planned: 3000, temporary: false, color: "#14b8a6" },
-  { name: "Other", planned: 1200, temporary: false, color: "#64748b" },
-];
-
-const defaultSavingsAccounts = [
-  { name: "Fixed Savings", currentBalance: 10000, newSavingsAdded: 0 },
-  { name: "32-Day Account", currentBalance: 8000, newSavingsAdded: 0 },
-  { name: "Savings Account", currentBalance: 40000, newSavingsAdded: 0 },
-  { name: "Chade's Trust Fund", currentBalance: 0, newSavingsAdded: 0 },
-  { name: "Ashleigh's Trust Fund", currentBalance: 0, newSavingsAdded: 0 },
-  { name: "EasyEquities Investments Total", currentBalance: 3000, newSavingsAdded: 0 },
-];
-
-function monthKey(date = new Date()) {
-  return date.toISOString().slice(0, 7);
-}
-
-function monthLabel(key) {
-  const [year, month] = key.split("-");
-  const date = new Date(Number(year), Number(month) - 1, 1);
-  return date.toLocaleString("en-ZA", { month: "long", year: "numeric" });
-}
-
-function previousMonthKey(key) {
-  const [year, month] = key.split("-").map(Number);
-  return monthKey(new Date(year, month - 2, 1));
-}
-
-function nextMonthKey(key) {
-  const [year, month] = key.split("-").map(Number);
-  return monthKey(new Date(year, month, 1));
-}
-
-function daysInMonth(key) {
-  const [year, month] = key.split("-").map(Number);
-  return new Date(year, month, 0).getDate();
-}
-
-function activeDayForMonth(key) {
-  const today = new Date();
-  if (monthKey(today) !== key) return daysInMonth(key);
-  return today.getDate();
-}
-
-function money(value) {
-  return `R${Number(value || 0).toLocaleString("en-ZA", { maximumFractionDigits: 0 })}`;
-}
-
-function percent(value) {
-  return `${Number(value || 0).toFixed(0)}%`;
-}
-
 export default function App() {
-  const [user, setUser] = useState(null);
-  const [authMode, setAuthMode] = useState("login");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [authError, setAuthError] = useState("");
-  const [loading, setLoading] = useState(true);
-
-  const [partnerA, setPartnerA] = useState("Ashleigh");
-  const [partnerB, setPartnerB] = useState("Chade");
-  const [selectedMonth, setSelectedMonth] = useState(monthKey());
-  const [availableMonths, setAvailableMonths] = useState([monthKey()]);
-  const [categories, setCategories] = useState(defaultCategories);
-  const [savingsAccounts, setSavingsAccounts] = useState(defaultSavingsAccounts);
-  const [expenses, setExpenses] = useState([]);
-  const [previousMonthExpenses, setPreviousMonthExpenses] = useState([]);
-
-  const [newCategoryName, setNewCategoryName] = useState("");
-  const [newCategoryPlanned, setNewCategoryPlanned] = useState("");
-
-  const [form, setForm] = useState({
-    date: new Date().toISOString().slice(0, 10),
-    description: "",
-    category: "Groceries",
-    amount: "",
-    paidBy: "Ashleigh",
-    split: "50/50",
+  const [data, setData] = useState(() => {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    return saved ? JSON.parse(saved) : defaultData;
   });
 
-  useEffect(() => {
-    return onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-      setLoading(false);
-    });
-  }, []);
+  const [expenseForm, setExpenseForm] = useState({ who: "Ashleigh", place: "", category: "Coffee", amount: "", date: new Date().toISOString().slice(0, 10) });
+  const [incomeForm, setIncomeForm] = useState({ who: "Ashleigh", source: "Salary", amount: "" });
+  const [accountForm, setAccountForm] = useState({ owner: "Ashleigh", name: "", type: "Deposit", current: "", monthly: "" });
+  const [newCategory, setNewCategory] = useState("");
 
   useEffect(() => {
-    if (!user) return undefined;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  }, [data]);
 
-    const settingsRef = doc(db, "couples", COUPLE_ID);
-    return onSnapshot(settingsRef, async (snapshot) => {
-      if (snapshot.exists()) {
-        const data = snapshot.data();
-        setPartnerA(data.partnerA || "Ashleigh");
-        setPartnerB(data.partnerB || "Chade");
-        setAvailableMonths(data.availableMonths?.length ? data.availableMonths : [monthKey()]);
-      } else {
-        await setDoc(settingsRef, {
-          partnerA: "Ashleigh",
-          partnerB: "Chade",
-          availableMonths: [monthKey()],
-          updatedAt: serverTimestamp(),
-        });
-      }
-    });
-  }, [user]);
-
-  useEffect(() => {
-    if (!user) return undefined;
-
-    const monthRef = doc(db, "couples", COUPLE_ID, "months", selectedMonth);
-    const expensesRef = collection(db, "couples", COUPLE_ID, "months", selectedMonth, "expenses");
-    const previousExpensesRef = collection(db, "couples", COUPLE_ID, "months", previousMonthKey(selectedMonth), "expenses");
-
-    const unsubMonth = onSnapshot(monthRef, async (snapshot) => {
-      if (snapshot.exists()) {
-        const data = snapshot.data();
-        setCategories(data.categories?.length ? data.categories : defaultCategories);
-        setSavingsAccounts(data.savingsAccounts?.length ? data.savingsAccounts : defaultSavingsAccounts);
-      } else {
-        await setDoc(monthRef, {
-          categories: defaultCategories,
-          savingsAccounts: defaultSavingsAccounts,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
-      }
-    });
-
-    const unsubExpenses = onSnapshot(query(expensesRef, orderBy("createdAt", "desc")), (snapshot) => {
-      setExpenses(snapshot.docs.map((item) => ({ id: item.id, ...item.data() })));
-    });
-
-    const unsubPrevious = onSnapshot(query(previousExpensesRef, orderBy("createdAt", "desc")), (snapshot) => {
-      setPreviousMonthExpenses(snapshot.docs.map((item) => ({ id: item.id, ...item.data() })));
-    });
-
-    return () => {
-      unsubMonth();
-      unsubExpenses();
-      unsubPrevious();
-    };
-  }, [user, selectedMonth]);
-
-  const saveCoupleSettings = async (updates) => {
-    await setDoc(
-      doc(db, "couples", COUPLE_ID),
-      { partnerA, partnerB, availableMonths, ...updates, updatedAt: serverTimestamp() },
-      { merge: true }
-    );
-  };
-
-  const saveMonth = async (updates) => {
-    await setDoc(
-      doc(db, "couples", COUPLE_ID, "months", selectedMonth),
-      { categories, savingsAccounts, ...updates, updatedAt: serverTimestamp() },
-      { merge: true }
-    );
-  };
-
-  const handleAuth = async () => {
-    setAuthError("");
-    try {
-      if (authMode === "login") await signInWithEmailAndPassword(auth, email, password);
-      else await createUserWithEmailAndPassword(auth, email, password);
-    } catch (error) {
-      setAuthError(error.message.replace("Firebase: ", ""));
-    }
-  };
-
-  const addExpense = async () => {
-    if (!form.description || !form.amount) return;
-    await addDoc(collection(db, "couples", COUPLE_ID, "months", selectedMonth, "expenses"), {
-      ...form,
-      amount: Number(form.amount),
-      createdBy: user.email,
-      createdAt: serverTimestamp(),
-    });
-    setForm({ ...form, description: "", amount: "" });
-  };
-
-  const deleteExpense = async (id) => {
-    await deleteDoc(doc(db, "couples", COUPLE_ID, "months", selectedMonth, "expenses", id));
-  };
-
-  const updateCategory = async (categoryName, planned) => {
-    const updated = categories.map((cat) =>
-      cat.name === categoryName ? { ...cat, planned: Number(planned || 0) } : cat
-    );
-    setCategories(updated);
-    await saveMonth({ categories: updated });
-  };
-
-  const addTemporaryCategory = async () => {
-    const name = newCategoryName.trim();
-    if (!name || categories.some((cat) => cat.name.toLowerCase() === name.toLowerCase())) return;
-
-    const colours = ["#ec4899", "#06b6d4", "#a855f7", "#f43f5e", "#84cc16"];
-    const newCategory = {
-      name,
-      planned: Number(newCategoryPlanned || 0),
-      temporary: true,
-      color: colours[categories.length % colours.length],
-    };
-    const updated = [...categories, newCategory];
-    setCategories(updated);
-    setNewCategoryName("");
-    setNewCategoryPlanned("");
-    await saveMonth({ categories: updated });
-  };
-
-  const deleteTemporaryCategory = async (name) => {
-    const updated = categories.filter((cat) => !(cat.name === name && cat.temporary));
-    setCategories(updated);
-    await saveMonth({ categories: updated });
-  };
-
-  const updateSavings = async (accountName, field, value) => {
-    const updated = savingsAccounts.map((account) =>
-      account.name === accountName ? { ...account, [field]: Number(value || 0) } : account
-    );
-    setSavingsAccounts(updated);
-    await saveMonth({ savingsAccounts: updated });
-  };
-
-  const startNewMonth = async () => {
-    const newMonth = nextMonthKey(selectedMonth);
-    const recurringCategories = categories.filter((cat) => !cat.temporary);
-    const resetSavings = savingsAccounts.map((account) => ({
-      ...account,
-      currentBalance: Number(account.currentBalance || 0) + Number(account.newSavingsAdded || 0),
-      newSavingsAdded: 0,
-    }));
-
-    await setDoc(doc(db, "couples", COUPLE_ID, "months", newMonth), {
-      categories: recurringCategories,
-      savingsAccounts: resetSavings,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-
-    const updatedMonths = Array.from(new Set([...availableMonths, newMonth])).sort();
-    setAvailableMonths(updatedMonths);
-    await saveCoupleSettings({ availableMonths: updatedMonths });
-    setSelectedMonth(newMonth);
-  };
+  const month = data.selectedMonth;
+  const monthExpenses = data.expenses[month] || [];
+  const monthIncome = data.income[month] || [];
 
   const totals = useMemo(() => {
-    const totalSpent = expenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
-    const plannedTotal = categories.reduce((sum, cat) => sum + Number(cat.planned || 0), 0);
+    const totalIncome = monthIncome.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+    const totalSpent = monthExpenses.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+    const totalSavingsMonthly = data.savingsAccounts.reduce((sum, acc) => sum + Number(acc.monthly || 0), 0);
+    const currentNetWorth = data.savingsAccounts.reduce((sum, acc) => sum + Number(acc.current || 0), 0);
+    const progress = Math.min(100, Math.round((currentNetWorth / data.targetNetWorth) * 100));
+    return { totalIncome, totalSpent, totalSavingsMonthly, currentNetWorth, progress };
+  }, [monthIncome, monthExpenses, data.savingsAccounts, data.targetNetWorth]);
 
-    const byCategory = categories.map((cat) => {
-      const actual = expenses
-        .filter((e) => e.category === cat.name)
-        .reduce((sum, e) => sum + Number(e.amount || 0), 0);
-      return { ...cat, actual };
+  const expenseAnalytics = useMemo(() => {
+    const byCategory = {};
+    const byPlace = {};
+    const byPersonPlace = {};
+
+    monthExpenses.forEach((e) => {
+      byCategory[e.category] = (byCategory[e.category] || 0) + Number(e.amount || 0);
+      byPlace[e.place] = (byPlace[e.place] || 0) + Number(e.amount || 0);
+      const key = `${e.who}|${e.place}`;
+      byPersonPlace[key] = (byPersonPlace[key] || 0) + 1;
     });
 
-    let aPaid = 0;
-    let bPaid = 0;
-    let aShare = 0;
-    let bShare = 0;
+    const topCategory = Object.entries(byCategory).sort((a, b) => b[1] - a[1])[0];
+    const topPlaces = Object.entries(byPlace).sort((a, b) => b[1] - a[1]).slice(0, 3);
+    const coffeeEntries = monthExpenses.filter((e) => e.category === "Coffee");
+    const takeOutEntries = monthExpenses.filter((e) => e.category === "Take Out");
 
-    expenses.forEach((expense) => {
-      const amount = Number(expense.amount || 0);
-      if (expense.paidBy === partnerA) aPaid += amount;
-      if (expense.paidBy === partnerB) bPaid += amount;
-
-      if (expense.split === "50/50") {
-        aShare += amount / 2;
-        bShare += amount / 2;
-      } else if (expense.split === partnerA) {
-        aShare += amount;
-      } else if (expense.split === partnerB) {
-        bShare += amount;
-      }
-    });
-
-    const currentSavings = savingsAccounts.reduce((sum, account) => sum + Number(account.currentBalance || 0), 0);
-    const newSavings = savingsAccounts.reduce((sum, account) => sum + Number(account.newSavingsAdded || 0), 0);
+    const countByWho = (items) =>
+      items.reduce((acc, item) => {
+        acc[item.who] = (acc[item.who] || 0) + 1;
+        return acc;
+      }, {});
 
     return {
-      totalSpent,
-      plannedTotal,
-      budgetLeft: plannedTotal - totalSpent,
+      topCategory,
+      topPlaces,
+      coffeeCounts: countByWho(coffeeEntries),
+      takeOutCounts: countByWho(takeOutEntries),
       byCategory,
-      aPaid,
-      bPaid,
-      aShare,
-      bShare,
-      aBalance: aPaid - aShare,
-      bBalance: bPaid - bShare,
-      currentSavings,
-      newSavings,
-      updatedSavings: currentSavings + newSavings,
-      savingsGrowth: currentSavings > 0 ? (newSavings / currentSavings) * 100 : 0,
     };
-  }, [expenses, categories, savingsAccounts, partnerA, partnerB]);
+  }, [monthExpenses]);
 
-  const spendingInsights = useMemo(() => {
-    const previousByCategory = categories.map((cat) => ({
-      name: cat.name,
-      previous: previousMonthExpenses
-        .filter((e) => e.category === cat.name)
-        .reduce((sum, e) => sum + Number(e.amount || 0), 0),
-    }));
+  const todaysVerse = bibleVerses[Math.floor(Date.now() / 86400000) % bibleVerses.length];
 
-    const top3 = [...totals.byCategory]
-      .filter((cat) => cat.actual > 0)
-      .sort((a, b) => b.actual - a.actual)
-      .slice(0, 3);
+  const updateData = (patch) => setData((prev) => ({ ...prev, ...patch }));
 
-    const top3Total = top3.reduce((sum, cat) => sum + cat.actual, 0);
-    const top3Percent = totals.totalSpent > 0 ? (top3Total / totals.totalSpent) * 100 : 0;
+  const addExpense = () => {
+    if (!expenseForm.place || !expenseForm.amount) return;
+    const newExpense = { ...expenseForm, id: Date.now(), amount: Number(expenseForm.amount) };
+    updateData({
+      expenses: {
+        ...data.expenses,
+        [month]: [...monthExpenses, newExpense],
+      },
+    });
+    setExpenseForm({ ...expenseForm, place: "", amount: "" });
+  };
 
-    const comparisons = totals.byCategory
-      .map((cat) => {
-        const previous = previousByCategory.find((item) => item.name === cat.name)?.previous || 0;
-        const change = previous > 0 ? ((cat.actual - previous) / previous) * 100 : null;
-        return { ...cat, previous, change };
-      })
-      .filter((cat) => cat.change !== null)
-      .sort((a, b) => Math.abs(b.change) - Math.abs(a.change));
+  const addIncome = () => {
+    if (!incomeForm.source || !incomeForm.amount) return;
+    const newIncome = { ...incomeForm, id: Date.now(), amount: Number(incomeForm.amount) };
+    updateData({
+      income: {
+        ...data.income,
+        [month]: [...monthIncome, newIncome],
+      },
+    });
+    setIncomeForm({ ...incomeForm, amount: "" });
+  };
 
-    const overspending = totals.byCategory
-      .map((cat) => ({ ...cat, over: cat.actual - Number(cat.planned || 0) }))
-      .filter((cat) => cat.over > 0)
-      .sort((a, b) => b.over - a.over);
+  const addSavingsAccount = () => {
+    if (!accountForm.name) return;
+    updateData({
+      savingsAccounts: [
+        ...data.savingsAccounts,
+        {
+          ...accountForm,
+          id: Date.now(),
+          current: Number(accountForm.current || 0),
+          monthly: Number(accountForm.monthly || 0),
+        },
+      ],
+    });
+    setAccountForm({ owner: "Ashleigh", name: "", type: "Deposit", current: "", monthly: "" });
+  };
 
-    const projection = activeDayForMonth(selectedMonth) > 0
-      ? (totals.totalSpent / activeDayForMonth(selectedMonth)) * daysInMonth(selectedMonth)
-      : totals.totalSpent;
+  const addCategory = () => {
+    if (!newCategory.trim()) return;
+    updateData({ categories: [...data.categories, newCategory.trim()] });
+    setNewCategory("");
+  };
 
-    return {
-      top3,
-      top3Percent,
-      comparisons,
-      overspending,
-      projection,
-      projectedOver: projection - totals.plannedTotal,
-    };
-  }, [categories, previousMonthExpenses, totals, selectedMonth]);
+  const createNewMonth = () => {
+    const name = prompt("Enter new month, e.g. June 2026");
+    if (!name) return;
+    updateData({
+      selectedMonth: name,
+      months: data.months.includes(name) ? data.months : [...data.months, name],
+      expenses: { ...data.expenses, [name]: data.expenses[name] || [] },
+      income: { ...data.income, [name]: data.income[name] || [] },
+    });
+  };
 
-  const coupleInsights = useMemo(() => {
-    const totalPaid = totals.aPaid + totals.bPaid;
-    const aPercent = totalPaid > 0 ? (totals.aPaid / totalPaid) * 100 : 50;
-    const bPercent = totalPaid > 0 ? (totals.bPaid / totalPaid) * 100 : 50;
+  const deleteExpense = (id) => {
+    updateData({
+      expenses: {
+        ...data.expenses,
+        [month]: monthExpenses.filter((e) => e.id !== id),
+      },
+    });
+  };
 
-    const categoryByPerson = categories
-      .map((cat) => {
-        const a = expenses
-          .filter((e) => e.category === cat.name && e.paidBy === partnerA)
-          .reduce((sum, e) => sum + Number(e.amount || 0), 0);
-        const b = expenses
-          .filter((e) => e.category === cat.name && e.paidBy === partnerB)
-          .reduce((sum, e) => sum + Number(e.amount || 0), 0);
-        return { name: cat.name, a, b, leader: a > b ? partnerA : b > a ? partnerB : "Even" };
-      })
-      .filter((row) => row.a > 0 || row.b > 0);
+  const deleteAccount = (id) => {
+    updateData({ savingsAccounts: data.savingsAccounts.filter((a) => a.id !== id) });
+  };
 
-    return { totalPaid, aPercent, bPercent, categoryByPerson };
-  }, [totals, categories, expenses, partnerA, partnerB]);
-
-  const amountOwed = Math.abs(totals.aBalance);
-  const whoOwes = totals.aBalance > 0 ? partnerB : totals.bBalance > 0 ? partnerA : "Nobody";
-  const whoIsOwed = totals.aBalance > 0 ? partnerA : totals.bBalance > 0 ? partnerB : "Nobody";
-  const budgetPercent = totals.plannedTotal > 0 ? Math.min((totals.totalSpent / totals.plannedTotal) * 100, 100) : 0;
-
-  if (loading) return <div className="loading">Loading {APP_NAME}...</div>;
-
-  if (!user) {
-    return (
-      <>
-        <AppStyles />
-        <main className="auth-page">
-          <section className="auth-card">
-            <div className="logo">♡</div>
-            <h1>{APP_NAME}</h1>
-            <p>Shared spending tracker for two.</p>
-            <input placeholder="Email address" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
-            <input placeholder="Password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
-            {authError && <div className="error">{authError}</div>}
-            <button className="primary" onClick={handleAuth}>{authMode === "login" ? "Log in" : "Create shared account"}</button>
-            <button className="link-button" onClick={() => setAuthMode(authMode === "login" ? "signup" : "login")}>{authMode === "login" ? "Need an account? Create one" : "Already have an account? Log in"}</button>
-          </section>
-        </main>
-      </>
-    );
-  }
+  const accountsByOwner = (owner) => data.savingsAccounts.filter((acc) => acc.owner === owner);
 
   return (
-    <>
-      <AppStyles />
-      <main className="app-shell">
-        <header className="topbar">
-          <div>
-            <div className="brand"><span>♡</span>{APP_NAME}</div>
-            <h1>Our Budget. Our Future.</h1>
-            <p>Monthly spending, savings, insights, and contribution tracking.</p>
+    <div className="min-h-screen bg-[#f8f3ee] text-[#3b2116]">
+      <aside className="fixed left-0 top-0 hidden h-full w-24 flex-col items-center gap-6 bg-[#4b230f] py-6 text-[#f5e7dc] lg:flex">
+        <Heart className="h-8 w-8" />
+        {[Home, PiggyBank, Wallet, BarChart3, Calendar, Settings].map((Icon, index) => (
+          <div key={index} className="rounded-2xl p-3 hover:bg-[#7a4325]">
+            <Icon className="h-6 w-6" />
           </div>
-          <div className="top-actions">
-            <select value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)}>
-              {availableMonths.map((month) => <option key={month} value={month}>{monthLabel(month)}</option>)}
+        ))}
+      </aside>
+
+      <main className="mx-auto max-w-7xl space-y-6 px-5 py-6 lg:ml-24">
+        <header className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h1 className="text-3xl font-black">Our 10 Year Plan</h1>
+            <p className="text-[#7b5a48]">Building our future together 🤎</p>
+          </div>
+          <div className="flex gap-3">
+            <select
+              value={month}
+              onChange={(e) => updateData({ selectedMonth: e.target.value })}
+              className="rounded-2xl border border-[#dec7b8] bg-white px-4 py-3"
+            >
+              {data.months.map((m) => (
+                <option key={m}>{m}</option>
+              ))}
             </select>
-            <button onClick={startNewMonth}>+ Start New Month</button>
-            <button onClick={() => signOut(auth)}>Log out</button>
+            <button onClick={createNewMonth} className="rounded-2xl bg-[#7a3f20] px-5 py-3 font-bold text-white shadow">
+              + New Month
+            </button>
           </div>
         </header>
 
-        <section className="card partner-card">
-          <label>Partner 1<input value={partnerA} onChange={(e) => setPartnerA(e.target.value)} onBlur={() => saveCoupleSettings({ partnerA })} /></label>
-          <label>Partner 2<input value={partnerB} onChange={(e) => setPartnerB(e.target.value)} onBlur={() => saveCoupleSettings({ partnerB })} /></label>
-        </section>
-
-        <section className="stats-grid">
-          <Stat label="Planned Budget" value={money(totals.plannedTotal)} helper={monthLabel(selectedMonth)} />
-          <Stat label="Actual Spend" value={money(totals.totalSpent)} helper="This month" />
-          <Stat label="Budget Left / Over" value={money(Math.abs(totals.budgetLeft))} helper={totals.budgetLeft >= 0 ? "Left to spend" : "Over budget"} warning={totals.budgetLeft < 0} />
-          <Stat label="Current Savings Total" value={money(totals.updatedSavings)} helper="Across accounts" />
-          <Stat label="New Savings Added" value={money(totals.newSavings)} helper="This month" />
-          <Stat label="Settle Up" value={amountOwed === 0 ? "All square" : money(amountOwed)} helper={amountOwed === 0 ? "Nobody owes" : `${whoOwes} owes ${whoIsOwed}`} />
-        </section>
-
-        <section className="card">
-          <div className="section-heading"><h2>Planned vs Actual Budget</h2><span>{money(totals.totalSpent)} / {money(totals.plannedTotal)}</span></div>
-          <Progress value={budgetPercent} color="#ec4899" />
-          <p className={totals.budgetLeft >= 0 ? "muted" : "danger"}>{totals.budgetLeft >= 0 ? `You have ${money(totals.budgetLeft)} left.` : `You are ${money(Math.abs(totals.budgetLeft))} over budget.`}</p>
-        </section>
-
-        <section className="two-col wide-left">
-          <section className="card">
-            <div className="section-heading"><div><h2>Category Budget Planner</h2><p className="muted">Edit planned amounts or add temporary categories for this month.</p></div></div>
-            <div className="inline-form">
-              <input placeholder="Temporary category e.g. Mom's Car" value={newCategoryName} onChange={(e) => setNewCategoryName(e.target.value)} />
-              <input placeholder="Planned amount" type="number" value={newCategoryPlanned} onChange={(e) => setNewCategoryPlanned(e.target.value)} />
-              <button className="primary" onClick={addTemporaryCategory}>+ Add Category</button>
+        <section className="rounded-3xl bg-white p-6 shadow-sm">
+          <div className="mb-5 flex items-center gap-3">
+            <Target className="text-[#8a4b2a]" />
+            <h2 className="text-xl font-black">10 Year Goal Tracker</h2>
+          </div>
+          <div className="grid gap-6 lg:grid-cols-[260px_1fr_220px]">
+            <div className="flex items-center gap-5">
+              <div className="grid h-40 w-40 place-items-center rounded-full border-[18px] border-[#8a4b2a] bg-[#f4e8df]">
+                <div className="text-center">
+                  <p className="text-4xl font-black">{totals.progress}%</p>
+                  <p className="text-xs font-bold uppercase">complete</p>
+                </div>
+              </div>
             </div>
-            <div className="table-wrap">
-              <table>
-                <thead><tr><th>Category</th><th>Planned</th><th>Actual</th><th>Left / Over</th><th>Progress</th><th></th></tr></thead>
+            <div className="space-y-4">
+              <div className="grid gap-4 md:grid-cols-3">
+                <Stat title="Target Amount" value={currency(data.targetNetWorth)} />
+                <Stat title="Current Amount" value={currency(totals.currentNetWorth)} />
+                <Stat title="Monthly Saving Target" value={currency(totals.totalSavingsMonthly)} />
+              </div>
+              <div className="h-5 overflow-hidden rounded-full bg-[#ead9cd]">
+                <div className="h-full bg-[#7a3f20]" style={{ width: `${totals.progress}%` }} />
+              </div>
+              <p className="text-sm text-[#7b5a48]">Projected goal includes TFSA wealth building and house/flat deposit savings.</p>
+            </div>
+            <div className="rounded-2xl bg-[#f7eee8] p-5">
+              <p className="text-sm text-[#7b5a48]">Target Date</p>
+              <p className="text-xl font-black">May 2036</p>
+              <p className="mt-4 text-sm text-[#7b5a48]">Years to go</p>
+              <p className="text-xl font-black">10 years</p>
+            </div>
+          </div>
+        </section>
+
+        <section className="grid gap-6 lg:grid-cols-3">
+          <Card title="Income / Salary">
+            <p className="text-3xl font-black">{currency(totals.totalIncome)}</p>
+            <p className="mb-4 text-sm text-[#7b5a48]">Total income for {month}</p>
+            <div className="space-y-2">
+              {monthIncome.map((i) => (
+                <div key={i.id} className="flex justify-between rounded-xl bg-[#f7eee8] p-3 text-sm">
+                  <span>{i.who} - {i.source}</span>
+                  <b>{currency(i.amount)}</b>
+                </div>
+              ))}
+            </div>
+            <div className="mt-4 grid gap-2">
+              <select className="input" value={incomeForm.who} onChange={(e) => setIncomeForm({ ...incomeForm, who: e.target.value })}>
+                <option>Ashleigh</option><option>Chade</option><option>Joint</option>
+              </select>
+              <input className="input" placeholder="Income source" value={incomeForm.source} onChange={(e) => setIncomeForm({ ...incomeForm, source: e.target.value })} />
+              <input className="input" placeholder="Amount" type="number" value={incomeForm.amount} onChange={(e) => setIncomeForm({ ...incomeForm, amount: e.target.value })} />
+              <button onClick={addIncome} className="button">Add Income</button>
+            </div>
+          </Card>
+
+          <SavingsCard owner="Ashleigh" accounts={accountsByOwner("Ashleigh")} onDelete={deleteAccount} />
+          <SavingsCard owner="Chade" accounts={accountsByOwner("Chade")} onDelete={deleteAccount} />
+        </section>
+
+        <section className="grid gap-6 lg:grid-cols-2">
+          <Card title="Add New Savings Account">
+            <div className="grid gap-3 md:grid-cols-2">
+              <select className="input" value={accountForm.owner} onChange={(e) => setAccountForm({ ...accountForm, owner: e.target.value })}>
+                <option>Ashleigh</option><option>Chade</option>
+              </select>
+              <select className="input" value={accountForm.type} onChange={(e) => setAccountForm({ ...accountForm, type: e.target.value })}>
+                <option>TFSA</option><option>Deposit</option><option>Fixed Deposit</option><option>32-Day</option><option>Other</option>
+              </select>
+              <input className="input" placeholder="Account name" value={accountForm.name} onChange={(e) => setAccountForm({ ...accountForm, name: e.target.value })} />
+              <input className="input" placeholder="Current balance" type="number" value={accountForm.current} onChange={(e) => setAccountForm({ ...accountForm, current: e.target.value })} />
+              <input className="input" placeholder="Monthly contribution" type="number" value={accountForm.monthly} onChange={(e) => setAccountForm({ ...accountForm, monthly: e.target.value })} />
+              <button onClick={addSavingsAccount} className="button flex items-center justify-center gap-2"><Plus size={18} /> Add Account</button>
+            </div>
+          </Card>
+
+          <Card title="Add New Expense Category">
+            <div className="flex gap-3">
+              <input className="input flex-1" placeholder="e.g. Beauty, Padel, Date Night" value={newCategory} onChange={(e) => setNewCategory(e.target.value)} />
+              <button onClick={addCategory} className="button">Add</button>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {data.categories.map((cat) => <span key={cat} className="rounded-full bg-[#f1e1d5] px-3 py-1 text-sm">{cat}</span>)}
+            </div>
+          </Card>
+        </section>
+
+        <section className="grid gap-6 lg:grid-cols-2">
+          <Card title="Expenses Overview">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="rounded-2xl bg-[#f7eee8] p-5">
+                <p className="text-sm text-[#7b5a48]">Total Spent</p>
+                <p className="text-3xl font-black">{currency(totals.totalSpent)}</p>
+                <p className="mt-2 text-sm">Remaining after income, savings and spending:</p>
+                <p className="text-xl font-bold">{currency(totals.totalIncome - totals.totalSpent - totals.totalSavingsMonthly)}</p>
+              </div>
+              <div className="space-y-2">
+                {Object.entries(expenseAnalytics.byCategory).map(([cat, value]) => (
+                  <div key={cat}>
+                    <div className="flex justify-between text-sm"><span>{cat}</span><b>{currency(value)}</b></div>
+                    <div className="h-2 rounded-full bg-[#ead9cd]"><div className="h-2 rounded-full bg-[#8a4b2a]" style={{ width: `${Math.min(100, (value / Math.max(totals.totalSpent, 1)) * 100)}%` }} /></div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="mt-5 grid gap-2 md:grid-cols-5">
+              <input className="input" type="date" value={expenseForm.date} onChange={(e) => setExpenseForm({ ...expenseForm, date: e.target.value })} />
+              <select className="input" value={expenseForm.who} onChange={(e) => setExpenseForm({ ...expenseForm, who: e.target.value })}>
+                <option>Ashleigh</option><option>Chade</option><option>Joint</option>
+              </select>
+              <input className="input" placeholder="Place e.g. Vida" value={expenseForm.place} onChange={(e) => setExpenseForm({ ...expenseForm, place: e.target.value })} />
+              <select className="input" value={expenseForm.category} onChange={(e) => setExpenseForm({ ...expenseForm, category: e.target.value })}>
+                {data.categories.map((cat) => <option key={cat}>{cat}</option>)}
+              </select>
+              <input className="input" type="number" placeholder="Amount" value={expenseForm.amount} onChange={(e) => setExpenseForm({ ...expenseForm, amount: e.target.value })} />
+            </div>
+            <button onClick={addExpense} className="button mt-3">Add Expense</button>
+          </Card>
+
+          <Card title="Expense Analytics">
+            <div className="grid gap-4 md:grid-cols-2">
+              <Insight title="Where you spend the most" value={expenseAnalytics.topCategory ? `${expenseAnalytics.topCategory[0]} - ${currency(expenseAnalytics.topCategory[1])}` : "No data yet"} />
+              <Insight title="Top places" value={expenseAnalytics.topPlaces.map(([p, v]) => `${p}: ${currency(v)}`).join(" • ") || "No data yet"} />
+              <Insight title="Coffee runs ☕" value={`Chade: ${expenseAnalytics.coffeeCounts.Chade || 0} entries • Ashleigh: ${expenseAnalytics.coffeeCounts.Ashleigh || 0} entries`} />
+              <Insight title="Take outs 🍔" value={`Chade: ${expenseAnalytics.takeOutCounts.Chade || 0} entries • Ashleigh: ${expenseAnalytics.takeOutCounts.Ashleigh || 0} entries`} />
+            </div>
+            <div className="mt-4 rounded-2xl bg-[#f7eee8] p-4 text-sm">
+              <b>This month’s insight:</b> {expenseAnalytics.topCategory ? `Your highest category is ${expenseAnalytics.topCategory[0]} at ${currency(expenseAnalytics.topCategory[1])}.` : "Add expenses to generate insights."}
+            </div>
+          </Card>
+        </section>
+
+        <section className="grid gap-6 lg:grid-cols-2">
+          <Card title="Recent Expenses">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-[#7b5a48]"><th>Date</th><th>Place</th><th>Category</th><th>Who</th><th>Amount</th><th></th></tr>
+                </thead>
                 <tbody>
-                  {totals.byCategory.map((cat) => {
-                    const left = Number(cat.planned || 0) - cat.actual;
-                    const used = cat.planned > 0 ? Math.min((cat.actual / cat.planned) * 100, 100) : cat.actual > 0 ? 100 : 0;
-                    return (
-                      <tr key={cat.name}>
-                        <td><Badge category={cat} /></td>
-                        <td><input className="small-input" type="number" value={cat.planned || 0} onChange={(e) => updateCategory(cat.name, e.target.value)} /></td>
-                        <td>{money(cat.actual)}</td>
-                        <td className={left >= 0 ? "good" : "danger"}>{left >= 0 ? `${money(left)} left` : `${money(Math.abs(left))} over`}</td>
-                        <td><Progress value={used} color={left >= 0 ? cat.color : "#ef4444"} /></td>
-                        <td>{cat.temporary && <button className="icon-button" onClick={() => deleteTemporaryCategory(cat.name)}>🗑</button>}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          <section className="card">
-            <h2>Add Expense</h2>
-            <div className="form-grid">
-              <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
-              <input placeholder="Description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
-              <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>{categories.map((cat) => <option key={cat.name}>{cat.name}</option>)}</select>
-              <input type="number" placeholder="Amount" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
-              <select value={form.paidBy} onChange={(e) => setForm({ ...form, paidBy: e.target.value })}><option>{partnerA}</option><option>{partnerB}</option></select>
-              <select value={form.split} onChange={(e) => setForm({ ...form, split: e.target.value })}><option>50/50</option><option>{partnerA}</option><option>{partnerB}</option></select>
-              <button
-                type="button"
-                className="primary"
-                onClick={addExpense}
->
-  Add Expense
-</button>
-            </div>
-          </section>
-        </section>
-
-        <section className="two-col wide-left">
-          <section className="card">
-            <h2>Savings & Investments</h2>
-            <div className="table-wrap">
-              <table>
-                <thead><tr><th>Account</th><th>Current Balance</th><th>New Savings Added</th><th>New Total</th></tr></thead>
-                <tbody>
-                  {savingsAccounts.map((account) => (
-                    <tr key={account.name}>
-                      <td>{account.name}</td>
-                      <td><input className="small-input" type="number" value={account.currentBalance || 0} onChange={(e) => updateSavings(account.name, "currentBalance", e.target.value)} /></td>
-                      <td><input className="small-input" type="number" value={account.newSavingsAdded || 0} onChange={(e) => updateSavings(account.name, "newSavingsAdded", e.target.value)} /></td>
-                      <td className="good">{money(Number(account.currentBalance || 0) + Number(account.newSavingsAdded || 0))}</td>
+                  {monthExpenses.map((e) => (
+                    <tr key={e.id} className="border-t border-[#ead9cd]">
+                      <td className="py-3">{e.date}</td><td>{e.place}</td><td>{e.category}</td><td>{e.who}</td><td>{currency(e.amount)}</td>
+                      <td><button onClick={() => deleteExpense(e.id)}><Trash2 size={16} /></button></td>
                     </tr>
                   ))}
-                  <tr className="total-row"><td>TOTAL</td><td>{money(totals.currentSavings)}</td><td>{money(totals.newSavings)}</td><td>{money(totals.updatedSavings)}</td></tr>
                 </tbody>
               </table>
             </div>
-          </section>
+          </Card>
 
-          <section className="card tile-grid">
-            <h2>Savings Comparison</h2>
-            <MiniTile label="Current Savings" value={money(totals.currentSavings)} />
-            <MiniTile label="New Savings Added" value={money(totals.newSavings)} />
-            <MiniTile label="Updated Total" value={money(totals.updatedSavings)} />
-            <MiniTile label="Growth This Month" value={`${totals.savingsGrowth.toFixed(2)}%`} />
-          </section>
+          <Card title="Monthly History">
+            <table className="w-full text-sm">
+              <thead><tr className="text-left text-[#7b5a48]"><th>Month</th><th>Income</th><th>Spent</th><th>Saved</th></tr></thead>
+              <tbody>
+                {data.months.map((m) => {
+                  const income = (data.income[m] || []).reduce((s, i) => s + Number(i.amount || 0), 0);
+                  const spent = (data.expenses[m] || []).reduce((s, e) => s + Number(e.amount || 0), 0);
+                  return (
+                    <tr key={m} className="border-t border-[#ead9cd]">
+                      <td className="py-3 font-bold">{m}</td><td>{currency(income)}</td><td>{currency(spent)}</td><td>{currency(totals.totalSavingsMonthly)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </Card>
         </section>
 
-        <section className="two-col">
-          <section className="card">
-            <h2>Monthly Spending Insights</h2>
-            <Insight text={spendingInsights.comparisons[0] ? `You spent ${Math.abs(spendingInsights.comparisons[0].change).toFixed(0)}% ${spendingInsights.comparisons[0].change >= 0 ? "more" : "less"} on ${spendingInsights.comparisons[0].name} than last month.` : "Add another month to compare spending trends."} />
-            <Insight text={`Your top 3 categories make up ${spendingInsights.top3Percent.toFixed(0)}% of your spending.`} />
-            <Insight text={spendingInsights.projectedOver > 0 ? `At your current pace, you may overspend by ${money(spendingInsights.projectedOver)}.` : `At your current pace, you should stay within budget.`} />
-            {spendingInsights.overspending[0] && <Insight text={`${spendingInsights.overspending[0].name} is over budget by ${money(spendingInsights.overspending[0].over)}.`} warning />}
-            <h3>Top 3 categories</h3>
-            {spendingInsights.top3.length ? spendingInsights.top3.map((cat, index) => <Row key={cat.name} label={`${index + 1}. ${cat.name}`} value={money(cat.actual)} />) : <p className="muted">No spending yet.</p>}
-          </section>
-
-          <section className="card">
-            <h2>Couple Insights</h2>
-            <div className="split-bar"><div style={{ width: `${coupleInsights.aPercent}%`, background: "#ec4899" }} /><div style={{ width: `${coupleInsights.bPercent}%`, background: "#3b82f6" }} /></div>
-            <div className="split-labels"><span>{partnerA}: {percent(coupleInsights.aPercent)}</span><span>{partnerB}: {percent(coupleInsights.bPercent)}</span></div>
-            <Insight text={`${totals.aPaid >= totals.bPaid ? partnerA : partnerB} paid more this month.`} />
-            <Insight text={`${partnerA} paid ${money(totals.aPaid)} and ${partnerB} paid ${money(totals.bPaid)}.`} />
-            {coupleInsights.categoryByPerson[0] && <Insight text={`${coupleInsights.categoryByPerson[0].leader} spends more on ${coupleInsights.categoryByPerson[0].name}.`} />}
-            <div className="table-wrap">
-              <table><thead><tr><th>Category</th><th>{partnerA}</th><th>{partnerB}</th><th>More</th></tr></thead><tbody>{coupleInsights.categoryByPerson.map((row) => <tr key={row.name}><td>{row.name}</td><td>{money(row.a)}</td><td>{money(row.b)}</td><td>{row.leader}</td></tr>)}</tbody></table>
-            </div>
-          </section>
-        </section>
-
-        <section className="two-col wide-left">
-          <section className="card">
-            <h2>Recent Expenses</h2>
-            <div className="expense-list">
-              {expenses.length ? expenses.map((expense) => {
-                const cat = categories.find((item) => item.name === expense.category) || { name: expense.category, color: "#64748b" };
-                return (
-                  <div className="expense-item" key={expense.id}>
-                    <div><strong>{expense.description}</strong><p>{expense.date} • Paid by {expense.paidBy} • Split {expense.split}</p><Badge category={cat} /></div>
-                    <div className="expense-amount"><strong>{money(expense.amount)}</strong><button onClick={() => deleteExpense(expense.id)}>🗑</button></div>
-                  </div>
-                );
-              }) : <p className="muted">No expenses for this month yet.</p>}
-            </div>
-          </section>
-
-          <section className="card">
-            <h2>Couple Summary</h2>
-            <Row label={`${partnerA} paid`} value={money(totals.aPaid)} />
-            <Row label={`${partnerB} paid`} value={money(totals.bPaid)} />
-            <Row label={`${partnerA}'s fair share`} value={money(totals.aShare)} />
-            <Row label={`${partnerB}'s fair share`} value={money(totals.bShare)} />
-            <div className="settlement">{amountOwed === 0 ? "You are even 💕" : `${whoOwes} owes ${whoIsOwed} ${money(amountOwed)}`}</div>
-          </section>
-        </section>
-
-        <section className="two-col">
-          <ChartCard title="Actual Spending by Category" data={totals.byCategory.filter((cat) => cat.actual > 0).map((cat) => ({ name: cat.name, value: cat.actual, color: cat.color }))} total={totals.totalSpent} />
-          <ChartCard title="Savings Split" data={savingsAccounts.map((account, index) => ({ name: account.name, value: Number(account.currentBalance || 0) + Number(account.newSavingsAdded || 0), color: ["#22c55e", "#f97316", "#3b82f6", "#8b5cf6", "#ec4899", "#64748b"][index] })).filter((item) => item.value > 0)} total={totals.updatedSavings} />
-        </section>
+        <footer className="rounded-3xl bg-[#4b230f] p-5 text-center text-[#f9eee7] shadow">
+          <p className="text-sm uppercase tracking-wide text-[#d6b69f]">Daily Bible Verse</p>
+          <p className="mt-2 text-lg font-semibold">{todaysVerse}</p>
+        </footer>
       </main>
-    </>
+
+      <style>{`
+        .input { border: 1px solid #dec7b8; background: white; border-radius: 14px; padding: 12px; outline: none; width: 100%; }
+        .input:focus { border-color: #8a4b2a; box-shadow: 0 0 0 3px rgba(138, 75, 42, 0.15); }
+        .button { background: #7a3f20; color: white; border-radius: 14px; padding: 12px 16px; font-weight: 800; }
+        .button:hover { background: #5f2e17; }
+      `}</style>
+    </div>
   );
 }
 
-function Stat({ label, value, helper, warning }) {
-  return <section className={`card stat ${warning ? "warning-card" : ""}`}><p>{label}</p><h2>{value}</h2><span>{helper}</span></section>;
-}
-
-function MiniTile({ label, value }) {
-  return <div className="mini-tile"><p>{label}</p><h3>{value}</h3></div>;
-}
-
-function Row({ label, value }) {
-  return <div className="row"><span>{label}</span><strong>{value}</strong></div>;
-}
-
-function Insight({ text, warning }) {
-  return <div className={`insight ${warning ? "warning" : ""}`}>{warning ? "⚠️" : "✨"} {text}</div>;
-}
-
-function Badge({ category }) {
-  return <span className="badge" style={{ background: `${category.color}22`, color: category.color, borderColor: `${category.color}55` }}><span style={{ background: category.color }} />{category.name}{category.temporary ? " • This month" : ""}</span>;
-}
-
-function Progress({ value, color }) {
-  return <div className="progress"><div style={{ width: `${Math.min(value, 100)}%`, background: color }} /></div>;
-}
-
-function ChartCard({ title, data, total }) {
+function Card({ title, children }) {
   return (
-    <section className="card">
-      <h2>{title}</h2>
-      {data.length ? data.map((item) => <div key={item.name} className="chart-row"><span style={{ background: item.color }} /><p>{item.name}</p><strong>{money(item.value)} ({total > 0 ? percent((item.value / total) * 100) : "0%"})</strong></div>) : <p className="muted">No data yet.</p>}
+    <section className="rounded-3xl bg-white p-6 shadow-sm">
+      <h2 className="mb-4 text-xl font-black text-[#5a2b16]">{title}</h2>
+      {children}
     </section>
   );
 }
 
-function AppStyles() {
-  return <style>{`
-    * { box-sizing: border-box; }
-    body { margin: 0; font-family: Inter, Arial, sans-serif; color: #111827; background: linear-gradient(135deg, #fff1f2, #ffffff, #eff6ff); }
-    input, select, button { font: inherit; }
-    input, select { width: 100%; border: 1px solid #e5e7eb; border-radius: 14px; padding: 12px 14px; background: white; outline: none; }
-    input:focus, select:focus { border-color: #8b5cf6; box-shadow: 0 0 0 3px #8b5cf622; }
-    button { border: 1px solid #e5e7eb; background: white; border-radius: 14px; padding: 12px 16px; cursor: pointer; font-weight: 700; }
-    button:hover { transform: translateY(-1px); }
-    .primary { background: linear-gradient(135deg, #7c3aed, #a855f7); color: white; border: none; }
-    .link-button { border: none; color: #6b7280; background: transparent; }
-    .loading, .auth-page { min-height: 100vh; display: grid; place-items: center; padding: 20px; }
-    .auth-card { width: min(430px, 100%); background: white; border: 1px solid #f3dbe8; border-radius: 28px; padding: 28px; box-shadow: 0 20px 60px #00000010; display: grid; gap: 14px; text-align: center; }
-    .logo { width: 56px; height: 56px; border-radius: 50%; background: #ffe4e6; color: #ec4899; margin: auto; display: grid; place-items: center; font-size: 34px; }
-    .error { color: #dc2626; background: #fef2f2; border: 1px solid #fecaca; padding: 10px; border-radius: 14px; font-size: 14px; }
-    .app-shell { max-width: 1400px; margin: auto; padding: 24px; display: grid; gap: 18px; }
-    .topbar { display: flex; justify-content: space-between; gap: 18px; align-items: center; }
-    .brand { color: #7c3aed; font-weight: 800; display: flex; align-items: center; gap: 8px; }
-    .brand span { font-size: 28px; }
-    h1 { font-size: clamp(30px, 5vw, 54px); margin: 8px 0 4px; letter-spacing: -0.04em; }
-    h2 { margin: 0 0 14px; font-size: 21px; }
-    h3 { margin: 18px 0 8px; }
-    p { margin: 0; }
-    .muted { color: #64748b; }
-    .danger { color: #ef4444; font-weight: 700; }
-    .good { color: #059669; font-weight: 700; }
-    .top-actions { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; min-width: min(620px, 100%); }
-    .card { background: rgba(255,255,255,0.9); border: 1px solid #e5e7eb; border-radius: 24px; padding: 20px; box-shadow: 0 8px 30px #00000008; }
-    .partner-card { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-    label { color: #64748b; font-size: 12px; display: grid; gap: 6px; }
-    .stats-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 14px; }
-    .stat p { color: #64748b; font-size: 13px; font-weight: 700; }
-    .stat h2 { font-size: 27px; margin: 12px 0 4px; }
-    .stat span { color: #94a3b8; font-size: 12px; }
-    .warning-card { background: #fff7ed; border-color: #fed7aa; }
-    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-items: start; }
-    .wide-left { grid-template-columns: 1.45fr 1fr; }
-    .section-heading { display: flex; justify-content: space-between; gap: 14px; align-items: center; margin-bottom: 12px; }
-    .inline-form { display: grid; grid-template-columns: 1fr 160px auto; gap: 10px; margin: 14px 0; }
-    .form-grid { display: grid; gap: 12px; }
-    .table-wrap { overflow-x: auto; }
-    table { width: 100%; border-collapse: collapse; min-width: 650px; }
-    th { text-align: left; color: #64748b; font-size: 13px; padding: 12px; border-bottom: 1px solid #e5e7eb; }
-    td { padding: 12px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
-    .small-input { max-width: 130px; padding: 9px 10px; }
-    .total-row { font-weight: 800; background: #fafafa; }
-    .badge { display: inline-flex; align-items: center; gap: 7px; border: 1px solid; padding: 7px 10px; border-radius: 999px; font-weight: 800; font-size: 12px; white-space: nowrap; }
-    .badge span { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-    .progress { height: 12px; background: #e5e7eb; border-radius: 999px; overflow: hidden; min-width: 120px; }
-    .progress div { height: 100%; border-radius: 999px; }
-    .icon-button { padding: 8px; border: none; background: transparent; }
-    .tile-grid { display: grid; gap: 12px; }
-    .mini-tile { background: #f8fafc; border-radius: 18px; padding: 16px; }
-    .mini-tile p { color: #64748b; font-size: 13px; }
-    .mini-tile h3 { color: #7c3aed; font-size: 22px; margin: 4px 0 0; }
-    .insight { background: white; border: 1px solid #e5e7eb; border-radius: 18px; padding: 12px; margin-bottom: 10px; color: #334155; }
-    .insight.warning { background: #fff7ed; border-color: #fed7aa; }
-    .split-bar { height: 18px; display: flex; border-radius: 999px; overflow: hidden; background: #e5e7eb; margin-bottom: 8px; }
-    .split-labels { display: flex; justify-content: space-between; color: #64748b; font-size: 13px; margin-bottom: 14px; }
-    .row { display: flex; justify-content: space-between; gap: 12px; background: #f8fafc; border-radius: 14px; padding: 10px 12px; margin-bottom: 8px; }
-    .expense-list { display: grid; gap: 12px; }
-    .expense-item { display: flex; justify-content: space-between; gap: 14px; border: 1px solid #e5e7eb; border-radius: 18px; padding: 14px; background: white; }
-    .expense-item p { color: #64748b; margin: 4px 0 8px; font-size: 13px; }
-    .expense-amount { display: grid; justify-items: end; gap: 8px; }
-    .expense-amount button { border: none; padding: 4px; color: #ef4444; }
-    .settlement { margin-top: 12px; background: #fff1f2; border: 1px solid #fecdd3; border-radius: 18px; padding: 16px; font-weight: 800; }
-    .chart-row { display: grid; grid-template-columns: 12px 1fr auto; gap: 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid #f1f5f9; }
-    .chart-row span { width: 12px; height: 12px; border-radius: 999px; }
-    .chart-row p { color: #334155; }
-    @media (max-width: 1050px) { .topbar, .two-col, .wide-left { grid-template-columns: 1fr; display: grid; } .stats-grid { grid-template-columns: repeat(2, 1fr); } .top-actions { grid-template-columns: 1fr; min-width: 0; } }
-    @media (max-width: 650px) { .app-shell { padding: 12px; } .stats-grid, .partner-card, .inline-form { grid-template-columns: 1fr; } .card { padding: 16px; border-radius: 20px; } .section-heading { align-items: flex-start; flex-direction: column; } .expense-item { flex-direction: column; } .expense-amount { justify-items: start; } }
-  `}</style>;
+function Stat({ title, value }) {
+  return (
+    <div className="rounded-2xl bg-[#f7eee8] p-4">
+      <p className="text-sm text-[#7b5a48]">{title}</p>
+      <p className="text-xl font-black">{value}</p>
+    </div>
+  );
+}
+
+function Insight({ title, value }) {
+  return (
+    <div className="rounded-2xl border border-[#ead9cd] bg-white p-4">
+      <p className="text-sm font-bold text-[#7a3f20]">{title}</p>
+      <p className="mt-2 text-lg font-black">{value}</p>
+    </div>
+  );
+}
+
+function SavingsCard({ owner, accounts, onDelete }) {
+  const total = accounts.reduce((sum, acc) => sum + Number(acc.current || 0), 0);
+  const monthly = accounts.reduce((sum, acc) => sum + Number(acc.monthly || 0), 0);
+
+  return (
+    <Card title={owner === "Ashleigh" ? "Her Savings" : "His Savings"}>
+      <div className="mb-4 grid grid-cols-2 gap-3">
+        <Stat title="Total Balance" value={currency(total)} />
+        <Stat title="Monthly Contribution" value={currency(monthly)} />
+      </div>
+      <div className="space-y-3">
+        {accounts.map((acc) => (
+          <div key={acc.id} className="flex items-center justify-between rounded-2xl border border-[#ead9cd] p-4">
+            <div>
+              <p className="font-bold">{acc.name}</p>
+              <p className="text-sm text-[#7b5a48]">{acc.type} • Monthly: {currency(acc.monthly)}</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <b>{currency(acc.current)}</b>
+              <button onClick={() => onDelete(acc.id)} className="text-[#8a4b2a]"><Trash2 size={16} /></button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
 }
